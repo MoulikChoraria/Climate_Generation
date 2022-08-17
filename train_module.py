@@ -15,6 +15,13 @@ class GAN(pl.LightningModule):
         self.D = discriminator
         self.automatic_optimization=False
         self.device = device
+    
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        parser = parent_parser.add_argument_group("GAN")
+        parser.add_argument("--num_filters", type=int, default=128)
+        parser.add_argument("--data_path", type=str, default="")
+        return parent_parser
 
     def sample_z(self, n) -> Tensor:
         sample = self._Z.sample((n,))
@@ -80,6 +87,8 @@ class GAN(pl.LightningModule):
 
 
 
-def train_model(in_features):
+def train_model():
 
     generator = torch.nn.Sequential([torch.nn.Linear()])
+
+
