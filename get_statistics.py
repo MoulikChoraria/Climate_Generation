@@ -29,7 +29,7 @@ def read_netcdfs(files, dim, transform_func=None):
 def transform_df(df):
     init_date = datetime.strptime('1980-01-01', '%Y-%m-%d')
     final_date = datetime.strptime('2021-12-31', '%Y-%m-%d')
-    bbox = [18.0, 74.0, 25.0, 81.0]
+    bbox = [18.0, 74.0, 24.4, 80.4]
     df_sel = df.sel(time=slice(init_date, final_date),
             latitude=slice(bbox[0], bbox[2]),
             longitude=slice(bbox[1], bbox[3]))
@@ -50,19 +50,29 @@ std_day = np.where(std_day == 0, std_day+1, std_day)
 #np.stack(arrays, axis=0).shape
 
 #normalize_array = (final_array-mean_array)/std_array
+#slack = 1e-1
+rainfall_stats = final_array.sum(axis=2).sum(axis=1)#+slack
+sample_non_zero = [rainfall_stats[i] for i in range(len(rainfall_stats)) if rainfall_stats[i] > 0]
+#rainfall_stats = np.log(rainfall_stats)
+rainfall_stats = np.array(sample_non_zero)
+rainfall_stats = np.log(rainfall_stats)
 
-rainfall_stats = final_array.sum(axis=2).sum(axis=1)
-_, bins, _ = plt.hist(rainfall_stats, bins=10)
+
+#print(np.min([rainfall_stats[i] for i in range(len(rainfall_stats))if rainfall_stats[i]>0]))
+nbins = 10
+_, bins, _ = plt.hist(rainfall_stats, bins=nbins)
 ### include max value in bin
 bins[-1]+=1
-print(bins)
-plt.savefig('hist_1980.png')
+bins[0]-= 1e-1
+#print(bins)
+plt.savefig('hist_1980_log_transform_rem0_10bins.png')
 
 #vals = np.random.random(1e8)
-nbins = 10
+
 #bins = np.linspace(0, 1, nbins+1)
 ind = np.digitize(rainfall_stats, bins, right=False)
-#print(ind-1)
+#print(ind, np.max(ind))
+#print(np.unique(ind))
 
 result = [np.count_nonzero(rainfall_stats[ind == j]) for j in range(1, nbins+1)]
 #result = [vals[ind == j] for j in range(1, nbins)]
