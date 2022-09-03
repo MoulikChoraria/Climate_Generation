@@ -5,6 +5,9 @@ import numpy as np
 import xarray
 import torchvision
 import pytorch_lightning as pl
+import matplotlib.pyplot as plt
+import torchvision.utils as vutils
+
 
 
 class GAN(pl.LightningModule):
@@ -15,6 +18,8 @@ class GAN(pl.LightningModule):
         self.D = discriminator
         self.automatic_optimization=False
         self.device = device
+        self.latent_dim = self.G.input_dim
+        self.validation_history = []
     
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -22,19 +27,22 @@ class GAN(pl.LightningModule):
         parser.add_argument("--num_filters", type=int, default=128)
         parser.add_argument("--data_path", type=str, default="")
         return parent_parser
-
-    def sample_z(self, n) -> Tensor:
-        sample = self._Z.sample((n,))
-        return sample
-
-    def sample_G(self, n, real_label) -> Tensor:
-        z = self.sample_z(n)
-        return self.G(z, real_label)
     
     def configure_optimizers(self):
         g_opt = torch.optim.Adam(self.G.parameters(), lr=1e-5)
         d_opt = torch.optim.Adam(self.D.parameters(), lr=1e-5)
         return g_opt, d_opt
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        fake = self.G(x, y)
+        preds = self.D(fake, y)
+        self.validation_history.append((vutils.make_grid(fake, padding=2, normalize=True)[:1, :, :].squeeze(0), preds))
+        plt.figure(figsize=(8,8))
+        plt.imshow(self.validation_history[-1][0], cmap='gray')
+        plt.show()
+        plt.show()
+
 
     def training_step(self, batch, batch_idx):
         
@@ -47,29 +55,22 @@ class GAN(pl.LightningModule):
 
 
         ### fake_label = 0
-
         fake_label = torch.full((b_size,), 0, dtype=torch.float, device=self.device)
+
         # Forward pass real batch through D
         d_output = self.D(real_img, real_label).view(-1)
-        # Calculate loss on all-real batch
         errD_real = self.criterion(d_output, real_label)
-        # Calculate gradients for D in backward pass        
 
-        ## Train with all-fake batch
-        # Generate fake batch from G
-        g_X = self.sample_G(b_size, real_label)
-
-        # Classify all fake batch with D
+        # Train with all-fake batch
+        noise = torch.randn(b_size, self.latent_dim, 1, 1, device=self.device)
+        g_X = self.G(noise, real_label)
         d_output = self.D(g_X.detach(), real_label).view(-1)
-        # Calculate D's loss on the all-fake batch
         errD_fake = self.criterion(d_output, fake_label)#*self.class_imbalance
-        # Calculate the gradients for this batch, accumulated (summed) with previous gradients
         
         # Compute error of D as sum over the fake and the real batches
         errD = errD_real + errD_fake
         d_opt.zero_grad()
         self.manual_backward(errD)
-        # Update D
         d_opt.step()
 
         self.log_dict({"g_loss": errG, "d_loss": errD}, prog_bar=True)
@@ -84,11 +85,5 @@ class GAN(pl.LightningModule):
         self.manual_backward(errG)
         # Update G
         g_opt.step()
-
-
-
-def train_model():
-
-    generator = torch.nn.Sequential([torch.nn.Linear()])
 
 

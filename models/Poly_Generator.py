@@ -105,11 +105,11 @@ def conv_transpose(in_f, out_f, kernel_size, stride=2, bias=True, pad='zero'):
 
 
 
-class Conditional_Model(nn.Module):
+class conditional_polygen(nn.Module):
     def __init__(self, input_dim, num_classes=5, g_layers=[], remove_hot = 0, activation_fn=True, inject_z=True, transform_rep=1, \
                     transform_z=False, norm='instance', filter_size = 3, bias = False,\
                             skip_connection = False, num_skip=4, skip_size=1, residual=False, up_mode = 'upsample'):
-        super(Conditional_Model, self).__init__()
+        super(conditional_polygen, self).__init__()
 
         self.residual = residual
         self.num_layers = len(g_layers)-1
