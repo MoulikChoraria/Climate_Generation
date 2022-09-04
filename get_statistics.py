@@ -36,36 +36,49 @@ def transform_df(df):
     return df_sel
 
 
-dir_path = "dataset"
+dir_path = "/home/moulikc2/expose/Climate Generation/data_chirps"
 combined = read_netcdfs(dir_path+'/*.nc', dim='time', transform_func=transform_df)
 final_array = combined.to_array().to_numpy().squeeze(0)
 print(final_array.shape)
 
+###normalize after removing 0 samples
+rainfall_stats = final_array.sum(axis=2).sum(axis=1)#+slack
+non_zero = [i for i in range(len(rainfall_stats)) if rainfall_stats[i] > 0]
+final_array = np.take(final_array, non_zero, axis=0)
+print("Non-zero data size:", final_array.shape)
+sv_path = "/home/moulikc2/expose/Climate Generation/data_chirps/chirps_filtered.npy"
+
+#np.save(sv_path, final_array) 
+
 mean_day = np.mean(final_array, axis=0)
 std_day = np.std(final_array, axis=0)
 std_day = np.where(std_day == 0, std_day+1, std_day)
+
+#normalize_array = (final_array-mean_day)/std_day
+
 
 #mean_array = [mean_day for _ in range(final_array.shape[0])]
 #std_array = [std_day for _ in range(final_array.shape[0])]
 #np.stack(arrays, axis=0).shape
 
 #normalize_array = (final_array-mean_array)/std_array
-#slack = 1e-1
-rainfall_stats = final_array.sum(axis=2).sum(axis=1)#+slack
-sample_non_zero = [rainfall_stats[i] for i in range(len(rainfall_stats)) if rainfall_stats[i] > 0]
+slack = 1e-1
+rainfall_stats = final_array.sum(axis=2).sum(axis=1)+slack
+#rainfall_stats = normalize_array.sum(axis=2).sum(axis=1)#+slack
+#sample_non_zero = [rainfall_stats[i] for i in range(len(rainfall_stats)) if rainfall_stats[i] > 0]
 #rainfall_stats = np.log(rainfall_stats)
-rainfall_stats = np.array(sample_non_zero)
+#rainfall_stats = np.array(sample_non_zero)
 rainfall_stats = np.log(rainfall_stats)
 
 
 #print(np.min([rainfall_stats[i] for i in range(len(rainfall_stats))if rainfall_stats[i]>0]))
-nbins = 10
+nbins = 5
 _, bins, _ = plt.hist(rainfall_stats, bins=nbins)
 ### include max value in bin
 bins[-1]+=1
 bins[0]-= 1e-1
 #print(bins)
-plt.savefig('hist_1980_log_transform_rem0_10bins.png')
+plt.savefig('hist_log_transform_rem0_5bins.png')
 
 #vals = np.random.random(1e8)
 
