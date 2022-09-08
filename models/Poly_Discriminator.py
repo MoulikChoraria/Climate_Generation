@@ -74,13 +74,13 @@ def conv(in_f, out_f, kernel_size, stride=1, bias=True, pad='zero'):
     layers = filter(lambda x: x is not None, [padder, convolver])
     return nn.Sequential(*layers)
 
-def conv_down(in_f, out_f, kernel_size, bias=True, pad='zero', down_mode='pool', pool_mode=None, pool_kernel_size=-1):
+def conv_down(in_f, out_f, kernel_size, bias=True, pad='zero', down_mode='pooling', pool_mode=None, pool_kernel_size=-1):
     ### every reduction by atmost a factor of 2
 
     if(pad == 'zero'):
         pad_func = nn.ZeroPad2d
     else:
-        pad_func = nn.RelectionPad2d
+        pad_func = nn.ReflectionPad2d
 
     padder1 = None
     padder2 = None
@@ -90,9 +90,9 @@ def conv_down(in_f, out_f, kernel_size, bias=True, pad='zero', down_mode='pool',
     #### H_out =⌊(H_in +2×padding[0]−dilation[0]×(kernel_size[0]−1)−1)/stride[0] +1⌋
 
 
-    if(down_mode == 'pool'):
+    if(down_mode == 'pooling'):
         stride = 1
-        padder1_pad = (kernel_size - stride)/stride
+        padder1_pad = (kernel_size - stride)//stride
         if(padder1_pad > 0):
             if padder1_pad % 2 == 0:
                 padder1 = pad_func((padder1_pad//2, padder1_pad//2, padder1_pad//2, padder1_pad//2))
@@ -110,9 +110,9 @@ def conv_down(in_f, out_f, kernel_size, bias=True, pad='zero', down_mode='pool',
                 padder2 = pad_func((padder2_pad//2, padder2_pad//2+1, padder2_pad//2, padder2_pad//2+1))
         
         if(pool_mode == 'avg'):
-            pool_func = nn.AvgPool2D
+            pool_func = nn.AvgPool2d
         else:
-            pool_func = nn.MaxPool2D
+            pool_func = nn.MaxPool2d
 
         pooler = pool_func(pool_kernel_size, pool_stride)
 
@@ -164,12 +164,11 @@ def conv_transpose(in_f, out_f, kernel_size, stride=2, bias=True, pad='zero'):
 
 
 
-class conditional_polydisc(nn.Module):
+class conditional_polydisc1(nn.Module):
     def __init__(self, input_dim, num_classes=5, d_layers=[], remove_hot = 0, inject_z=True, transform_rep=1, \
-                    #transform_z=False, 
-                            norm='instance', filter_size = 3, bias = False,\
+                    norm='instance', filter_size = 3, bias = False,\
                             skip_connection = False, num_skip=4, skip_size=1, residual=False, downsample_mode = 'pooling', pool_type='avg', pool_filter = 2):
-        super(conditional_polydisc, self).__init__()
+        super(conditional_polydisc1, self).__init__()
 
         self.residual = residual
         self.num_layers = len(d_layers)-1
@@ -177,7 +176,6 @@ class conditional_polydisc(nn.Module):
         self.filter_size = filter_size
         #self.downsample_filter = 3
         self.inject_z = inject_z
-        self.num_layers = len(self.g_layers) - 1  # minus the input/output sizes 
         #self.transform_z = transform_z
         self.norm = norm
         self.bias = bias
@@ -185,6 +183,8 @@ class conditional_polydisc(nn.Module):
         self.num_skip = num_skip
         self.skip_size = skip_size
         self.d_layers = d_layers
+        self.num_layers = len(self.d_layers) - 1  # minus the input/output sizes 
+
         self.num_classes = num_classes
         self.input_dim = input_dim
         self.transform_rep = transform_rep
@@ -192,12 +192,12 @@ class conditional_polydisc(nn.Module):
         self.pool_filter_size = pool_filter
         self.pool_filter_type = pool_type
         
-        self.embedding = nn.Embedding(self.num_classes, self.input_dim)
+        self.embedding = nn.Embedding(self.num_classes, self.input_dim[0]*self.input_dim[0])
         
         # if self.transform_z:
         #     for i in range(self.transform_rep):
         #         setattr(self, "global{}".format(i), nn.Sequential(
-        #                                                 nn.Linear(self.g_layers[0], self.g_layers[0]),
+        #                                                 nn.Linear(self.d_layers[0], self.d_layers[0]),
         #                                                 nn.ReLU()))
         
         total_injections = 0
@@ -208,31 +208,37 @@ class conditional_polydisc(nn.Module):
         else:
             norm_func = nn.BatchNorm2d
 
+        
+
 
         for i in range(self.num_layers):
+
             if i > 0 and (i < self.num_layers-1) and self.skip_connection:
-                in_filters = self.g_layers[i] + self.num_skip
+                in_filters = self.d_layers[i] + self.num_skip
             else:
-                in_filters = self.g_layers[i]
+                in_filters = self.d_layers[i]
             
             if (i < self.num_layers-1):
-                setattr(self, "conv_layer{}".format(i), nn.Sequential(conv_down(in_filters, self.g_layers[i+1], kernel_size = self.filter_size, bias=self.bias, pad='reflect', \
-                                                                            down_mode = self.down_mode, pool_mode=self.pool_filter_type, pool_kernel_size=self.pool_filter_size), 
-                                                                    norm_func(self.g_layers[i+1]),
+                setattr(self, "conv_layer{}".format(i), nn.Sequential(#printshape(), \
+                                                                      conv_down(in_filters, self.d_layers[i+1], kernel_size = self.filter_size, bias=self.bias, pad='reflect', \
+                                                                            down_mode = self.down_mode, pool_mode=self.pool_filter_type, pool_kernel_size=self.pool_filter_size),
+                                                                    #printshape(), 
+                                                                    norm_func(self.d_layers[i+1]),
                                                                     nn.LeakyReLU(negative_slope = 0.2),
-                                                                    conv(self.g_layers[i+1], self.g_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
-                                                                    norm_func(self.g_layers[i+1]),
+                                                                    conv(self.d_layers[i+1], self.d_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                                                                    norm_func(self.d_layers[i+1]),
                                                                     nn.LeakyReLU(negative_slope = 0.2)))
                 track_dim = (track_dim[0]//2, track_dim[1]//2)
 
+
             else:
-                lin_dim = final_layer_filters*(track_dim[0]//2)*(track_dim[1]//2)
                 final_layer_filters = 16
+
+                lin_dim = final_layer_filters*(track_dim[0]//2)*(track_dim[1]//2)
                 if self.skip_connection:
-                        curr_layer_filters =  self.g_layers[i] + self.num_skip
-                        #final_layer_filters = 128 + self.num_skip
+                    curr_layer_filters =  self.d_layers[i] + self.num_skip
                 else:
-                    curr_layer_filters =  self.g_layers[i]
+                    curr_layer_filters =  self.d_layers[i]
 
                 setattr(self, "conv_layer{}".format(i), nn.Sequential(
                                                             conv_down(curr_layer_filters, final_layer_filters, kernel_size = self.filter_size, bias=self.bias, pad='reflect', \
@@ -243,31 +249,35 @@ class conditional_polydisc(nn.Module):
                 setattr(self, "linear_layer{}".format(i+1), nn.Sequential(
                                                 nn.Linear(lin_dim, lin_dim//8, bias=self.bias),
                                                 nn.ReLU(),
-                                                nn.Linear(lin_dim, self.g_layers[i+1], bias=self.bias)))
+                                                nn.Linear(lin_dim//8, self.d_layers[i+1], bias=self.bias)))
                                                 
                 
             if self.skip_connection and i < self.num_layers-1:
-                setattr(self, "skip_layer{}".format(i), nn.Sequential(conv(self.g_layers[0], self.num_skip, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                
+
+                setattr(self, "skip_layer{}".format(i), nn.Sequential(conv(self.d_layers[0], self.num_skip, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
                                                                     norm_func(self.num_skip),
                                                                     nn.AdaptiveAvgPool2d(track_dim),
                                                                     nn.LeakyReLU(negative_slope = 0.2)))
 
             if self.inject_z and total_injections < self.allowed_injections and i < self.num_layers-1:
-                #skip_in_filters = self.g_layers[0]
+                #skip_in_filters = self.d_layers[0]
                 total_injections += 1
-                setattr(self, "skip_layer{}".format(i), nn.Sequential(conv(self.g_layers[0], self.self.g_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                setattr(self, "inject_layer{}".format(i), nn.Sequential(conv(self.d_layers[0], self.d_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
                                                                 norm_func(self.num_skip),
                                                                 nn.AdaptiveAvgPool2d(track_dim),
                                                                 nn.LeakyReLU(negative_slope = 0.2)))
+
 
 
         
 
     def forward(self, input, cat):
         #print(self.embedding(cat))
-        embed = self.label_embedding(cat)
+        embed = self.embedding(cat)
         reshape_embed = embed.reshape(input.size(0), 1, input.size(2), input.size(3))
         z = torch.cat((input, reshape_embed), dim=1)
+        #print(z.shape)
         
         # combined_input = input
         # return (self.main(combined_input).squeeze(3).squeeze(2))
@@ -306,7 +316,8 @@ class conditional_polydisc(nn.Module):
                     x = torch.cat((x, skip), dim=1)
 
             #apply injection
-
+        x = x.reshape(x.size(0), x.size(1)*x.size(2)*x.size(3))
+        #print(x.shape)
         x = getattr(self, "linear_layer{}".format(self.num_layers))(x)
 
         return x
