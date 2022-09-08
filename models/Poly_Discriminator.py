@@ -247,53 +247,34 @@ class conditional_polydisc(nn.Module):
                                                 
                 
             if self.skip_connection and i < self.num_layers-1:
-                #skip_in_filters = self.g_layers[0]
-                if self.upsample_mode == 'upsample' or i==0:
-                ### upsample purely via upsampling module
-                    setattr(self, "skip_layer{}".format(i), nn.Sequential(conv(self.g_layers[0], self.num_skip, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.num_skip),
-                                                                        nn.LeakyReLU(negative_slope = 0.2),
-                                                                        nn.Upsample(scale_factor=2**(i+1), mode='bicubic', align_corners=False)))
+                setattr(self, "skip_layer{}".format(i), nn.Sequential(conv(self.g_layers[0], self.num_skip, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                                                                    norm_func(self.num_skip),
+                                                                    nn.AdaptiveAvgPool2d(track_dim),
+                                                                    nn.LeakyReLU(negative_slope = 0.2)))
 
-                else:
-                ### upsample via convtranspose2d + upsample_module    
-                    setattr(self, "skip_layer{}".format(i), nn.Sequential(conv_transpose(self.g_layers[0], self.num_skip, kernel_size = self.filter_size, stride = 2, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.num_skip),
-                                                                        nn.LeakyReLU(negative_slope = 0.2),
-                                                                        nn.Upsample(scale_factor=2**(i), mode='bicubic', align_corners=False)))
-
-            if self.inject_z and total_injections < self.allowed_injections:
+            if self.inject_z and total_injections < self.allowed_injections and i < self.num_layers-1:
                 #skip_in_filters = self.g_layers[0]
                 total_injections += 1
-                if self.upsample_mode == 'upsample' or i==0:
-                ### upsample purely via upsampling module
-                    setattr(self, "inject_layer{}".format(i), nn.Sequential(conv(self.g_layers[0], self.g_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.g_layers[i+1]),
-                                                                        nn.LeakyReLU(negative_slope = 0.2),
-                                                                        nn.Upsample(scale_factor=2**(i+1), mode='bicubic', align_corners=False)))
-
-                else:
-                ### upsample via convtranspose2d + upsample_module    
-                    setattr(self, "inject_layer{}".format(i), nn.Sequential(conv_transpose(self.g_layers[0], self.g_layers[i+1], kernel_size = self.filter_size, stride = 2, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.g_layers[i+1]),
-                                                                        nn.LeakyReLU(negative_slope = 0.2),
-                                                                        nn.Upsample(scale_factor=2**(i), mode='bicubic', align_corners=False)))
+                setattr(self, "skip_layer{}".format(i), nn.Sequential(conv(self.g_layers[0], self.self.g_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                                                                norm_func(self.num_skip),
+                                                                nn.AdaptiveAvgPool2d(track_dim),
+                                                                nn.LeakyReLU(negative_slope = 0.2)))
 
 
         
 
     def forward(self, input, cat):
         #print(self.embedding(cat))
-        embed = self.embedding(cat).squeeze(1).unsqueeze(2).unsqueeze(3)
-        #print(input.size(), embed.size())
-        if(self.transform_z):
-            input = getattr(self, "global_transform")(input)
+        embed = self.label_embedding(cat)
+        reshape_embed = embed.reshape(input.size(0), 1, input.size(2), input.size(3))
+        z = torch.cat((input, reshape_embed), dim=1)
+        
+        # combined_input = input
+        # return (self.main(combined_input).squeeze(3).squeeze(2))
+        # if(self.transform_z):
+        #     input = getattr(self, "global_transform")(input)
 
-        z = input*embed
-        s_tuple = z.size()
-        ### shape = (batch, input_dim, 1, 1)
-        z = z.view((s_tuple[0], s_tuple[1]//16, 4, 4))
-        ### shape = (batch, input_dim//16, 4, 4)
+        #z = input*embed
         injections = self.allowed_injections
 
         for i in range(self.num_layers):
@@ -326,6 +307,6 @@ class conditional_polydisc(nn.Module):
 
             #apply injection
 
-        x = getattr(self, "conv_layer{}".format(self.num_layers))(x)
+        x = getattr(self, "linear_layer{}".format(self.num_layers))(x)
 
         return x
