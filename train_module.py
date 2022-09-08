@@ -24,13 +24,15 @@ class GAN(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("GAN")
-        parser.add_argument("--num_filters", type=int, default=128)
         parser.add_argument("--data_path", type=str, default="")
+        parser.add_argument("--learning_rate_G", type=float, default=1e-5)
+        parser.add_argument("--learning_rate_D", type=float, default=1e-5)
+        parser.add_argument("--D_iters", type=int, default=1)
         return parent_parser
     
-    def configure_optimizers(self):
-        g_opt = torch.optim.Adam(self.G.parameters(), lr=1e-5)
-        d_opt = torch.optim.Adam(self.D.parameters(), lr=1e-5)
+    def configure_optimizers(self, lr_G = 1e-5, lr_D = 1e-5):
+        g_opt = torch.optim.Adam(self.G.parameters(), lr_G)
+        d_opt = torch.optim.Adam(self.D.parameters(), lr_D)
         return g_opt, d_opt
 
     def validation_step(self, batch, batch_idx):
