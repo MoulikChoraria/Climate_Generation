@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def transform_get_labels(data, norm='coord', ncategs=10, precalc_stats=None):
+def transform_get_labels(data, norm='log_transform_min_max', ncategs=10, precalc_stats=None):
     
     ### co-ordinate-wise normalization
     if(precalc_stats != None):
@@ -37,15 +37,32 @@ def transform_get_labels(data, norm='coord', ncategs=10, precalc_stats=None):
         min_day = np.min(data)
         norm_den = max_day-min_day
         norm_stats = [max_day, min_day, norm_den]
+    
+    elif(norm == 'log_transform_min_max'):
+    ### normalization over all pixels
+        slack = np.min(np.where(data>0, data, 1))*1e-1
+        print(slack, np.min(data))
+        data = np.log(data+slack)
+        min_day = np.min(data, axis=0)
+        max_day = np.max(data, axis=0)
+        #norm_den = np.std(data, axis=0)
+        norm_den = max_day-min_day
+        norm_den = np.where(norm_den == 0, 1, norm_den)
         
     rainfall_normalized = (data-min_day)/norm_den
-    slack = np.min(np.where(rainfall_normalized>0, rainfall_normalized, 1))*1e-1
+
+    if(norm != 'log_transform_min_max'):
+        slack = np.min(np.where(rainfall_normalized>0, rainfall_normalized, 1))*1e-1
+        rainfall_stats = rainfall_normalized.sum(axis=2).sum(axis=1)+slack
+        rainfall_stats = np.log(rainfall_stats)
+
+    else:
+        rainfall_stats = rainfall_normalized.sum(axis=2).sum(axis=1)
+
 
     norm_stats.append(slack)
 
-    rainfall_stats = rainfall_normalized.sum(axis=2).sum(axis=1)+slack
     ### log_transform
-    rainfall_stats = np.log(rainfall_stats)
     nbins = ncategs
     _, bins, _ = plt.hist(rainfall_stats, bins=nbins)
     ### include max value in bin
@@ -130,17 +147,23 @@ def get_sampler(keys, sampler_type="uniform", k_val=1e-2, num_quantiles=10):
     return sampler
 
 
-def prep_dataloaders(data_path, train_val_split = 0.9, seed=129, ncategs=10, norm_type='coord', bs = 16, workers=2, train_sampler=True):
+def prep_dataloaders(data_path, train_val_split = 0.9, seed=129, ncategs=10, norm_type='coord', bs = 32, workers=2, train_sampler=True):
     
     data = np.load(data_path)
-    train_len = len(data)*train_val_split
-    val_len = len(data) - len(data)*train_val_split
-    train, val = random_split(data, [train_len, val_len], generator=torch.Generator().manual_seed(seed))
-    train_data, train_stats, train_categs = transform_get_labels(train, norm_type, ncategs)
-    val_data, _, val_categs = transform_get_labels(val, norm_type, ncategs, train_stats)
-
-    chirps_train_dataset = ChirpsDataset(train_data, train_categs)
-    chirps_val_dataset = ChirpsDataset(val_data, val_categs)
+    if(train_val_split < 1):
+        train_len = len(data)*train_val_split
+        val_len = len(data) - len(data)*train_val_split
+        train, val = random_split(data, [train_len, val_len], generator=torch.Generator().manual_seed(seed))
+        train_data, train_stats, train_categs = transform_get_labels(train, norm_type, ncategs)
+        val_data, _, val_categs = transform_get_labels(val, norm_type, ncategs, train_stats)
+        chirps_train_dataset = ChirpsDataset(train_data, train_categs)
+        chirps_val_dataset = ChirpsDataset(val_data, val_categs)
+    else:
+        train_len = len(data)
+        train_data, train_stats, train_categs = transform_get_labels(train, norm_type, ncategs)
+        chirps_train_dataset = ChirpsDataset(train_data, train_categs)
+        chirps_val_dataset = None
+        #val_data, _, val_categs = transform_get_labels(val, norm_type, ncategs, train_stats)
 
     if train_sampler==True:
         weighted_sampler = get_sampler(train_categs, sampler_type='categorical', k_val=1e-1)
@@ -148,7 +171,10 @@ def prep_dataloaders(data_path, train_val_split = 0.9, seed=129, ncategs=10, nor
     else:
         train_dataloader = DataLoader(chirps_train_dataset, batch_size=bs, num_workers=workers, shuffle=True)
 
-    val_dataloader = DataLoader(chirps_val_dataset, batch_size=bs, num_workers=workers, shuffle=False)
+    if(chirps_val_dataset is not None):
+        val_dataloader = DataLoader(chirps_val_dataset, batch_size=bs, num_workers=workers, shuffle=False)
+    else:
+        val_dataloader = None
 
     return train_dataloader, val_dataloader, train_stats
 

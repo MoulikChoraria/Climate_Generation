@@ -24,10 +24,10 @@ class GAN(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("GAN")
-        parser.add_argument("--data_path", type=str, default="")
+        #parser.add_argument("--data_path", type=str, default="")
         parser.add_argument("--learning_rate_G", type=float, default=1e-5)
         parser.add_argument("--learning_rate_D", type=float, default=1e-5)
-        parser.add_argument("--D_iters", type=int, default=1)
+        #parser.add_argument("--D_iters", type=int, default=1)
         return parent_parser
     
     def configure_optimizers(self, lr_G = 1e-5, lr_D = 1e-5):
@@ -36,12 +36,13 @@ class GAN(pl.LightningModule):
         return g_opt, d_opt
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        x, y = batch[0].to(self.device), batch[1].to(self.device)
         fake = self.G(x, y)
         preds = self.D(fake, y)
         self.validation_history.append((vutils.make_grid(fake, padding=2, normalize=True)[:1, :, :].squeeze(0), preds))
+        print(y, preds)
         plt.figure(figsize=(8,8))
-        plt.imshow(self.validation_history[-1][0], cmap='gray')
+        plt.imshow(self.validation_history[-1][0])#, cmap='gray')
         plt.show()
         plt.show()
 
@@ -64,7 +65,7 @@ class GAN(pl.LightningModule):
         errD_real = self.criterion(d_output, real_label)
 
         # Train with all-fake batch
-        noise = torch.randn(b_size, self.latent_dim, 1, 1, device=self.device)
+        noise = torch.randn((b_size, self.latent_dim, 1, 1), device=self.device)
         g_X = self.G(noise, real_label)
         d_output = self.D(g_X.detach(), real_label).view(-1)
         errD_fake = self.criterion(d_output, fake_label)#*self.class_imbalance
