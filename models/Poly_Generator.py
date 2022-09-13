@@ -107,7 +107,7 @@ def conv_transpose(in_f, out_f, kernel_size, stride=2, bias=True, pad='zero'):
 
 class conditional_polygen(nn.Module):
     def __init__(self, input_dim, num_classes=5, layers=[], remove_hot = 0, inject_z=True, transform_rep=1, \
-                    transform_z=False, norm='instance', filter_size = 3, bias = False,\
+                    transform_z=False, norm_type='instance', filter_size = 3, bias = False,\
                             skip_connection = False, num_skip=4, skip_size=1, residual=False, up_mode = 'upsample'):
         super(conditional_polygen, self).__init__()
 
@@ -121,7 +121,7 @@ class conditional_polygen(nn.Module):
         self.inject_z = inject_z
         self.num_layers = len(self.layers) - 1  # minus the input/output sizes 
         self.transform_z = transform_z
-        self.norm = norm
+        self.norm_type = norm_type
         self.bias = bias
         self.skip_connection = skip_connection
         self.num_skip = num_skip
@@ -141,7 +141,7 @@ class conditional_polygen(nn.Module):
         
         total_injections = 0
         
-        if(self.norm == 'instance'):
+        if(self.norm_type == 'instance'):
             norm_func = nn.InstanceNorm2d
         else:
             norm_func = nn.BatchNorm2d
@@ -189,8 +189,8 @@ class conditional_polygen(nn.Module):
                                                 conv(final_layer_filters, 128, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'),
                                                 norm_func(128),
                                                 nn.LeakyReLU(negative_slope = 0.2),
-                                                conv(128, self.layers[i+1], kernel_size = 1, stride = 1, bias=self.bias, pad='reflect'),
-                                                nn.Sigmoid()))
+                                                conv(128, self.layers[i+1], kernel_size = 1, stride = 1, bias=self.bias, pad='reflect')))#,
+                                                #nn.Sigmoid()))
                                                 
                 
             if self.skip_connection and i < self.num_layers-1:
@@ -249,14 +249,14 @@ class conditional_polygen(nn.Module):
                 x = z
 
             x = getattr(self, "conv_layer{}".format(i))(x)
-            print("conv", i, x.size())
+            #print("conv", i, x.size())
 
             if(self.inject_z and injections>0):
                 if i < self.num_layers - 1:
 
                     injections -= 1
                     a = getattr(self, "inject_layer{}".format(i))(z)
-                    print("inject", i, a.size())
+                    #print("inject", i, a.size())
 
                     if not self.residual:
                         x *= a
@@ -267,8 +267,8 @@ class conditional_polygen(nn.Module):
             if self.skip_connection:
                 if i < self.num_layers - 1:
                     skip = getattr(self, "skip_layer{}".format(i))(z)
-                    print("skip", i, skip.size())
-                    print("out", i, x.size())
+                    #print("skip", i, skip.size())
+                    #print("out", i, x.size())
                     x = torch.cat((x, skip), dim=1)
 
             #apply injection

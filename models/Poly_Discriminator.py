@@ -248,7 +248,7 @@ class conditional_polydisc(nn.Module):
                 setattr(self, "linear_layer{}".format(i+1), nn.Sequential(
                                                 nn.Linear(lin_dim, lin_dim//8, bias=self.bias),
                                                 nn.ReLU(),
-                                                nn.Linear(lin_dim//8, self.layers[i+1], bias=self.bias)))
+                                                nn.Linear(lin_dim//8, 1, bias=self.bias)))
                                                 
                 
             if self.skip_connection and i < self.num_layers-1:
@@ -263,7 +263,7 @@ class conditional_polydisc(nn.Module):
                 #skip_in_filters = self.layers[0]
                 total_injections += 1
                 setattr(self, "inject_layer{}".format(i), nn.Sequential(conv(self.layers[0], self.layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
-                                                                norm_func(self.num_skip),
+                                                                norm_func(self.layers[i+1]),
                                                                 nn.AdaptiveAvgPool2d(track_dim),
                                                                 nn.LeakyReLU(negative_slope = 0.2)))
 
@@ -292,14 +292,14 @@ class conditional_polydisc(nn.Module):
                 x = z
 
             x = getattr(self, "conv_layer{}".format(i))(x)
-            print("conv", i, x.size())
+            #print("conv", i, x.size())
 
             if(self.inject_z and injections>0):
                 if i < self.num_layers - 1:
 
                     injections -= 1
                     a = getattr(self, "inject_layer{}".format(i))(z)
-                    print("inject", i, a.size())
+                    #print("inject", i, a.size())
 
                     if not self.residual:
                         x *= a
@@ -310,8 +310,8 @@ class conditional_polydisc(nn.Module):
             if self.skip_connection:
                 if i < self.num_layers - 1:
                     skip = getattr(self, "skip_layer{}".format(i))(z)
-                    print("skip", i, skip.size())
-                    print("out", i, x.size())
+                    #print("skip", i, skip.size())
+                    #print("out", i, x.size())
                     x = torch.cat((x, skip), dim=1)
 
             #apply injection

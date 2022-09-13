@@ -1,0 +1,3 @@
+lr_D: 1.0e-05
+lr_G: 1.0e-05
+run_name: test_run
