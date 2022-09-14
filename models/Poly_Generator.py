@@ -189,8 +189,8 @@ class conditional_polygen(nn.Module):
                                                 conv(final_layer_filters, 128, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'),
                                                 norm_func(128),
                                                 nn.LeakyReLU(negative_slope = 0.2),
-                                                conv(128, self.layers[i+1], kernel_size = 1, stride = 1, bias=self.bias, pad='reflect')))#,
-                                                #nn.Sigmoid()))
+                                                conv(128, self.layers[i+1], kernel_size = 1, stride = 1, bias=self.bias, pad='reflect'),#,
+                                                nn.Sigmoid()))
                                                 
                 
             if self.skip_connection and i < self.num_layers-1:

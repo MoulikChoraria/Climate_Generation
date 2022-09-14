@@ -231,7 +231,7 @@ class conditional_polydisc(nn.Module):
 
 
             else:
-                final_layer_filters = 16
+                final_layer_filters = 32
 
                 lin_dim = final_layer_filters*(track_dim[0]//2)*(track_dim[1]//2)
                 if self.skip_connection:
@@ -246,9 +246,9 @@ class conditional_polydisc(nn.Module):
                                                             nn.LeakyReLU(negative_slope = 0.2)))
 
                 setattr(self, "linear_layer{}".format(i+1), nn.Sequential(
-                                                nn.Linear(lin_dim, lin_dim//8, bias=self.bias),
+                                                nn.Linear(lin_dim, lin_dim//4, bias=self.bias),
                                                 nn.ReLU(),
-                                                nn.Linear(lin_dim//8, 1, bias=self.bias)))
+                                                nn.Linear(lin_dim//4, 1, bias=self.bias)))
                                                 
                 
             if self.skip_connection and i < self.num_layers-1:

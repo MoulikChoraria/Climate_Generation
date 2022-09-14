@@ -111,8 +111,8 @@ def get_sampler(keys, sampler_type="uniform", k_val=1e-6, num_quantiles=10):
             categs, counts = np.unique(keys, return_counts=True)
             weights = np.zeros_like(keys)*1.0
             for i in range(len(categs)):
-                my_array = np.where(keys==categs[i], 1.0/((counts[i])**1.2+ np.sum(counts)*k_val), 0)
-                print(categs[i], 1.0/((counts[i])**1.2+ np.sum(counts)*k_val))
+                my_array = np.where(keys==categs[i], 1.0/((counts[i])+ np.sum(counts)*k_val), 0)
+                print(categs[i], counts[i], 1.0/((counts[i])+ np.sum(counts)*k_val))
                 weights += my_array    
             ### add normalization
             weights = weights/np.sum(weights)

@@ -28,14 +28,14 @@ class GAN(pl.LightningModule):
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("GAN")
         #parser.add_argument("--data_path", type=str, default="")
-        parser.add_argument("--learning_rate_G", type=float, default=1e-5)
-        parser.add_argument("--learning_rate_D", type=float, default=1e-5)
+        parser.add_argument("--learning_rate_G", type=float, default=5e-5)
+        parser.add_argument("--learning_rate_D", type=float, default=5e-5)
         #parser.add_argument("--D_iters", type=int, default=1)
         return parent_parser
     
     def configure_optimizers(self):
-        g_opt = torch.optim.Adam(self.G.parameters(), self.hparams.lr_G)
-        d_opt = torch.optim.Adam(self.D.parameters(), self.hparams.lr_D)
+        g_opt = torch.optim.RMSprop(self.G.parameters(), self.hparams.lr_G)
+        d_opt = torch.optim.RMSprop(self.D.parameters(), self.hparams.lr_D)
         return g_opt, d_opt
 
     def validation_step(self, batch, batch_idx):
@@ -69,6 +69,7 @@ class GAN(pl.LightningModule):
 
     def criterion(self, y_hat, y):
         loss = torch.nn.BCEWithLogitsLoss()
+        #loss = torch.nn.BCELoss()
         return loss(y_hat, y.float())
 
     def training_step(self, batch, batch_idx):
@@ -78,16 +79,20 @@ class GAN(pl.LightningModule):
 
         # Format batch
         real_img = batch[0]
-        real_label = batch[1]
+        categs = batch[1]
         b_size = real_img.size(0)
 
         #print("yo1")
         ### fake_label = 0
         fake_label = torch.full((b_size,), 0, dtype=torch.float)
-        fake_label = fake_label.type_as(real_label)
+        fake_label = fake_label.type_as(categs)
+
+        real_label = torch.full((b_size,), 1, dtype=torch.float)
+        real_label = real_label.type_as(categs)
 
         # Forward pass real batch through D
-        d_output = self.D(real_img, real_label).view(-1)
+        self.D.zero_grad()
+        d_output = self.D(real_img, categs).view(-1)
         #print("d_step")
 
         errD_real = self.criterion(d_output, real_label)
@@ -95,10 +100,10 @@ class GAN(pl.LightningModule):
         # Train with all-fake batch
         noise = torch.randn((b_size, self.latent_dim, 1, 1))
         noise = noise.type_as(real_img)
-        g_X = self.G(noise, real_label)
+        g_X = self.G(noise, categs)
         #print("g_step")
 
-        d_output = self.D(g_X.detach(), real_label).view(-1)
+        d_output = self.D(g_X.detach(), categs).view(-1)
         errD_fake = self.criterion(d_output, fake_label)#*self.class_imbalance
         #print("yo3")
         # Compute error of D as sum over the fake and the real batches
@@ -112,7 +117,9 @@ class GAN(pl.LightningModule):
         # (2) Update G network: maximize log(D(G(z)))
         ###########################
         # Calculate G's loss based on D's output
-        errG = self.criterion(self.D(g_X, real_label).view(-1), fake_label)
+        #self.G.zero_grad()
+
+        errG = self.criterion(self.D(g_X, categs).view(-1), real_label)
         # Calculate gradients for G
         g_opt.zero_grad()
         self.manual_backward(errG)
