@@ -32,10 +32,11 @@ if __name__ == "__main__":
 
     ### add generator specific args
     G_parser = parser.add_argument_group("generator")
-    G_parser.add_argument("--g_input_dim", type=int, default=128)
+    #### input_dim = required_filters - 1 for embedding layer
+    G_parser.add_argument("--g_input_dim", type=int, default=127)
     #G_parser.add_argument("--conditional_model", type=bool, default=True)
     G_parser.add_argument("--g_num_classes", type=int, default=10)
-    G_parser.add_argument("--g_layers", type=list, default=[8, 128, 256, 256, 256, 128, 1])
+    G_parser.add_argument("--g_layers", type=list, default=[128, 128, 256, 512, 256, 128, 1])
     G_parser.add_argument("--g_inject_z", type=bool, default=False)
     G_parser.add_argument("--g_remove_hot", type=int, default=2)
     G_parser.add_argument("--g_transform_rep", type=int, default=1)
@@ -45,7 +46,7 @@ if __name__ == "__main__":
     G_parser.add_argument("--g_skip_connection", type=bool, default=True)
     G_parser.add_argument("--g_bias", type=bool, default=True)
     G_parser.add_argument("--g_filter_size", type=int, default=3)
-    G_parser.add_argument("--g_num_skip", type=int, default=32)
+    G_parser.add_argument("--g_num_skip", type=int, default=64)
     G_parser.add_argument("--g_skip_size", type=int, default=3)
     G_parser.add_argument("--g_residual", type=bool, default=True)
 
@@ -72,7 +73,7 @@ if __name__ == "__main__":
 
     ### add training specific args
     Trainer_parser = parser.add_argument_group("trainer")
-    Trainer_parser.add_argument("--epochs", type=int, default=50)
+    Trainer_parser.add_argument("--epochs", type=int, default=100)
     Trainer_parser.add_argument("--data_path", type=str)
     #D_parser.add_argument("--conditional_model", type=bool, default=True)
     Trainer_parser.add_argument("--val_epochs", type=int, default=5)

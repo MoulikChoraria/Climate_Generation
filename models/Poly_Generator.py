@@ -236,10 +236,12 @@ class conditional_polygen(nn.Module):
         if(self.transform_z):
             input = getattr(self, "global_transform")(input)
 
-        z = input*embed
+        #z = input*embed
+        z = torch.cat([input, embed], 1)
         s_tuple = z.size()
         ### shape = (batch, input_dim, 1, 1)
-        z = z.view((s_tuple[0], s_tuple[1]//16, 4, 4))
+        #z = z.view((s_tuple[0], s_tuple[1]//16, 4, 4))
+        z = z.repeat(s_tuple[0], s_tuple[1], 4, 4)
         ### shape = (batch, input_dim//16, 4, 4)
         injections = self.allowed_injections
 
