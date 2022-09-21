@@ -3,9 +3,12 @@ import os
 from torch.utils.data import Dataset, DataLoader, random_split, WeightedRandomSampler
 import numpy as np 
 import matplotlib.pyplot as plt
+import random
+import torchvision.utils as vutils
 
 
-def transform_get_labels(data, norm='log_transform', ncategs=10, precalc_stats=None, filtering=True):
+
+def transform_get_labels(data, norm='log_transform', ncategs=10, precalc_stats=None):
     
     ### co-ordinate-wise normalization
     slack = -1
@@ -40,22 +43,8 @@ def transform_get_labels(data, norm='log_transform', ncategs=10, precalc_stats=N
         norm_stats = [max_day, min_day, norm_den]
         
     rainfall_normalized = (data-min_day)/norm_den
-
-    if(norm == "log_transform" and filtering==True):
-        rainfall_stats = rainfall_normalized.mean(axis=2).mean(axis=1)
-        rainfall_stats_max = rainfall_normalized.max(axis=2).max(axis=1)#+slack
-        rainfall_stats_mean = rainfall_normalized.mean(axis=2).mean(axis=1)#+slack
-
-        indices_max = [ind for ind in range(len(rainfall_stats_max)) if rainfall_stats_max[ind]>0.01]
-        indices_mean = [ind for ind in range(len(rainfall_stats_mean)) if rainfall_stats_mean[ind]>0.0001]
-        final_indices = list(set(indices_max).intersection(set(indices_mean)))
-        # #final_indices = indices_max
-        rainfall_stats = rainfall_stats_mean[final_indices]
-        rainfall_normalized = rainfall_normalized[final_indices, :, :]
-
-    else:
-        rainfall_stats = rainfall_normalized.mean(axis=2).mean(axis=1)
-        # #print(len(indices_max), len(indices_mean))
+    rainfall_stats = rainfall_normalized.mean(axis=2).mean(axis=1)
+    # #print(len(indices_max), len(indices_mean))
 
 
     if(norm != 'log_transform'):
@@ -65,7 +54,7 @@ def transform_get_labels(data, norm='log_transform', ncategs=10, precalc_stats=N
 
     
 
-    print(slack)
+    #print(slack)
     norm_stats.append(slack)
 
     ### log_transform
@@ -112,7 +101,7 @@ def get_sampler(keys, sampler_type="uniform", k_val=1e-6, num_quantiles=10):
             weights = np.zeros_like(keys)*1.0
             for i in range(len(categs)):
                 my_array = np.where(keys==categs[i], 1.0/((counts[i])+ np.sum(counts)*k_val), 0)
-                print(categs[i], counts[i], 1.0/((counts[i])+ np.sum(counts)*k_val))
+                #print(categs[i], counts[i], 1.0/((counts[i])+ np.sum(counts)*k_val))
                 weights += my_array    
             ### add normalization
             weights = weights/np.sum(weights)
@@ -144,36 +133,90 @@ def get_sampler(keys, sampler_type="uniform", k_val=1e-6, num_quantiles=10):
     return sampler
 
 
-def prep_dataloaders(data_path, train_val_split = 0.9, seed=129, ncategs=10, norm_type='coord', bs = 32, workers=2, train_sampler=True):
+def prep_dataloaders(data_path, ncategs=10, norm_type='coord', bs = 32, workers=2, sampler=True):
     
     data = np.load(data_path)
-    if(train_val_split < 1):
-        train_len = len(data)*train_val_split
-        val_len = len(data) - len(data)*train_val_split
-        train, val = random_split(data, [train_len, val_len], generator=torch.Generator().manual_seed(seed))
-        train_data, train_stats, train_categs = transform_get_labels(train, norm_type, ncategs)
-        val_data, _, val_categs = transform_get_labels(val, norm_type, ncategs, train_stats)
-        chirps_train_dataset = ChirpsDataset(train_data, train_categs)
-        chirps_val_dataset = ChirpsDataset(val_data, val_categs)
-    else:
-        train_len = len(data)
-        train_data, train_stats, train_categs = transform_get_labels(data, norm_type, ncategs)
-        chirps_train_dataset = ChirpsDataset(train_data, train_categs)
-        chirps_val_dataset = None
-        #val_data, _, val_categs = transform_get_labels(val, norm_type, ncategs, train_stats)
+    train_len = 30*data.shape[1]
+    test_len = 10*data.shape[1]
+    val_len = data.shape[1]
+    
+    ### reshape
+    data = data.reshape(data.shape[0]*data.shape[1], data.shape[2], data.shape[3])
+    data, data_stats, data_categs = transform_get_labels(data, norm_type, ncategs)
+    train_data, train_categs = data[0:train_len], data_categs[0:train_len]
 
-    if train_sampler==True:
-        weighted_sampler = get_sampler(train_categs, sampler_type='categorical', k_val=1e-6)
+    val_data, val_categs = data[train_len: train_len+val_len], data_categs[train_len: train_len+val_len]
+    test_data, test_categs = data[train_len+val_len: train_len+val_len+test_len], data_categs[train_len+val_len: train_len+val_len+test_len]
+
+    #remove zeros from training
+    train_rainfall_mean = train_data.mean(axis=2).mean(axis=1)
+    non_zero = [i for i in range(len(train_rainfall_mean)) if train_rainfall_mean[i] > 0]
+    zero = [i for i in range(len(train_rainfall_mean)) if train_rainfall_mean[i] == 0]
+    test_rainfall_mean = test_data.mean(axis=2).mean(axis=1)
+    print(np.sum(np.where(test_rainfall_mean < 0, 1, 0)), "yo")
+
+    combined_indices = (non_zero + zero[:5])
+    combined_indices.sort()
+    train_data, train_categs = train_data[combined_indices, :, :], train_categs[combined_indices]
+
+    ### get train samples
+    categ0 = [i for i in range(len(train_categs)) if train_categs[i]==0]
+    categ1 = [i for i in range(len(train_categs)) if train_categs[i]==1]
+    categ2 = [i for i in range(len(train_categs)) if train_categs[i]==2]
+    categ3 = [i for i in range(len(train_categs)) if train_categs[i]==3]
+    categ4 = [i for i in range(len(train_categs)) if train_categs[i]==4]
+
+    random.shuffle(categ0)
+    train_data0 = train_data[categ0[:8]]
+
+    random.shuffle(categ1)
+    train_data1 = train_data[categ1[:8]]
+
+    random.shuffle(categ2)
+    train_data2 = train_data[categ2[:8]]
+
+    random.shuffle(categ3)
+    train_data3 = train_data[categ3[:8]]
+
+    random.shuffle(categ4)
+    train_data4 = train_data[categ4[:8]]
+    grid = np.concatenate([train_data0, train_data1, train_data2, train_data3, train_data4])
+    grid_torch = torch.Tensor(grid).unsqueeze(1)
+
+    img = vutils.make_grid(grid_torch, padding=2, normalize=True)[:1, :, :].squeeze(0)
+
+    plt.figure(figsize=(8,8))
+    plt.imshow(img)#, cmap='gray')
+    plt.savefig('/home/moulikc2/expose/Climate Generation/training_samples.png')
+    plt.close()
+
+
+
+    chirps_train_dataset = ChirpsDataset(train_data, train_categs)
+    chirps_val_dataset = ChirpsDataset(val_data, val_categs)
+    chirps_test_dataset = ChirpsDataset(test_data, test_categs)
+    
+
+    if sampler==True:
+        weighted_sampler = get_sampler(train_categs, sampler_type='categorical', k_val=1e-5)
         train_dataloader = DataLoader(chirps_train_dataset, batch_size=bs, num_workers=workers, sampler=weighted_sampler)
+        print("Training Length", len(chirps_train_dataset))
+
+        weighted_sampler = get_sampler(val_categs, sampler_type='categorical', k_val=1e-4)
+        val_dataloader = DataLoader(chirps_val_dataset, batch_size=bs, num_workers=workers, sampler=weighted_sampler)
+
+        weighted_sampler = get_sampler(test_categs, sampler_type='categorical', k_val=1e-5)
+        test_dataloader = DataLoader(chirps_test_dataset, batch_size=bs, num_workers=workers, sampler=weighted_sampler)
+        print("Test Length", len(chirps_test_dataset))
+
     else:
         train_dataloader = DataLoader(chirps_train_dataset, batch_size=bs, num_workers=workers, shuffle=True)
-
-    if(chirps_val_dataset is not None):
         val_dataloader = DataLoader(chirps_val_dataset, batch_size=bs, num_workers=workers, shuffle=False)
-    else:
-        val_dataloader = None
+        test_dataloader = DataLoader(chirps_test_dataset, batch_size=bs, num_workers=workers, shuffle=False)
 
-    return train_dataloader, val_dataloader, train_stats
+
+
+    return train_dataloader, val_dataloader, test_dataloader, data_stats
 
 
 

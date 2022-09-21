@@ -6,12 +6,16 @@ from datetime import datetime
 from glob import glob
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 
-sv_path = "/home/moulikc2/expose/Climate Generation/data_chirps/chirps_filtered.npy"
+sv_path = "/home/moulikc2/expose/Climate Generation/data_chirps/chirps_filtered_monsoon.npy"
 data = np.load(sv_path)
+s_tuple = data.shape
+data = data.reshape(s_tuple[0]*s_tuple[1], s_tuple[2], s_tuple[3])
+
 print(data.shape)
 norm = 'log_transform_normalize'
-ncategs = 10
+ncategs = 5
 #normalize_array = (final_array-mean_day)/std_day
 if(norm == 'coord'):
     max_day = np.max(data, axis=0)
@@ -63,18 +67,20 @@ rainfall_normalized = (data-min_day)/norm_den
 #print(rainfall_normalized.shape)
 #slack = np.min(np.where(rainfall_normalized>0, rainfall_normalized, 1))*1e-1
 #print(slack)
-
+rainfall_stats = rainfall_normalized.sum(axis=2).sum(axis=1)#+slack
+non_zero = [i for i in range(len(rainfall_stats)) if rainfall_stats[i] > 0]
+rainfall_stats = rainfall_stats[non_zero]
 #norm_stats.append(slack)
-rainfall_stats_max = rainfall_normalized.max(axis=2).max(axis=1)#+slack
-rainfall_stats_mean = rainfall_normalized.mean(axis=2).mean(axis=1)#+slack
+#rainfall_stats_max = rainfall_normalized.max(axis=2).max(axis=1)#+slack
+#rainfall_stats_mean = rainfall_normalized.mean(axis=2).mean(axis=1)#+slack
 
-indices_max = [ind for ind in range(len(rainfall_stats_max)) if rainfall_stats_max[ind]>0.01]
-indices_mean = [ind for ind in range(len(rainfall_stats_mean)) if rainfall_stats_mean[ind]>0.001]
+#indices_max = [ind for ind in range(len(rainfall_stats_max)) if rainfall_stats_max[ind]>0.01]
+#indices_mean = [ind for ind in range(len(rainfall_stats_mean)) if rainfall_stats_mean[ind]>0.001]
 # #print(len(indices_max), len(indices_mean))
 
-final_indices = list(set(indices_max).intersection(set(indices_mean)))
+#final_indices = list(set(indices_max).intersection(set(indices_mean)))
 # #final_indices = indices_max
-rainfall_stats = rainfall_stats_mean[final_indices]
+#rainfall_stats = rainfall_stats_mean[final_indices]
 #rainfall_stats = rainfall_stats_max[indices_max]
 
 print(rainfall_stats.shape)
@@ -97,7 +103,8 @@ print(rainfall_stats.shape)
 ### log_transform
 #rainfall_stats = np.log(rainfall_stats)
 #nbins = ncategs
-nbins = 10
+nbins = 5
+sns.set()
 #bins=np.logspace(start=-4, stop=0, num=nbins)
 _, bins, _ = plt.hist(rainfall_stats, bins=nbins)
 #plt.xscale('log')
@@ -117,7 +124,9 @@ bins[-1]+=1
 # bins[-1]+=1
 # bins[0]-= 1e-1
 # #print(bins)
-plt.savefig('hist_test_100.png')
+plt.xlabel('Amount of Rainfall')
+plt.ylabel('Counts')
+plt.savefig('hist_monsoon.png')
 
 #vals = np.random.random(1e8)
 
@@ -131,4 +140,14 @@ result = [np.count_nonzero(rainfall_stats[ind == j]) for j in range(1, nbins+1)]
 print(np.sum(result))
 # #result = [vals[ind == j] for j in range(1, nbins)]
 print(result)
-    
+
+plt.close()
+
+#sns.set_style('whitegrid')
+swarm_plot = sns.kdeplot(rainfall_stats)
+plt.xlabel('Amount of Rainfall')
+plt.ylabel('Density')
+plt.tight_layout()
+
+#fig = swarm_plot.get_figure()
+plt.savefig("kde.png") 

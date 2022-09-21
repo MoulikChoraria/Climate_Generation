@@ -101,13 +101,15 @@ def conv_transpose(in_f, out_f, kernel_size, stride=2, bias=True, pad='zero'):
 
 
     layers = filter(lambda x: x is not None, [convolver, padder])
-    return nn.Sequential(*layers)
+    final_layers =  nn.Sequential(*layers)
+    #print(convolver, final_layers)
+    return final_layers
 
 
 
 class conditional_polygen(nn.Module):
-    def __init__(self, input_dim, num_classes=5, layers=[], remove_hot = 0, inject_z=True, transform_rep=1, \
-                    transform_z=False, norm_type='instance', filter_size = 3, bias = False,\
+    def __init__(self, input_dim, num_classes=5, layers=[], remove_hot = 0, inject_z=True, \
+                    transform_z=True, transform_embedding=True, norm_type='instance', filter_size = 3, bias = False,\
                             skip_connection = False, num_skip=4, skip_size=1, residual=False, up_mode = 'upsample'):
         super(conditional_polygen, self).__init__()
 
@@ -121,6 +123,7 @@ class conditional_polygen(nn.Module):
         self.inject_z = inject_z
         self.num_layers = len(self.layers) - 1  # minus the input/output sizes 
         self.transform_z = transform_z
+        self.transform_embedding = transform_embedding
         self.norm_type = norm_type
         self.bias = bias
         self.skip_connection = skip_connection
@@ -129,15 +132,24 @@ class conditional_polygen(nn.Module):
         self.layers = layers
         self.num_classes = num_classes
         self.input_dim = input_dim
-        self.transform_rep = transform_rep
         self.upsample_mode = up_mode
-        self.embedding = nn.Embedding(self.num_classes, self.input_dim)
+        print(self.upsample_mode)
         
         if self.transform_z:
-            for i in range(self.transform_rep):
-                setattr(self, "global{}".format(i), nn.Sequential(
-                                                        nn.Linear(self.layers[0], self.layers[0]),
-                                                        nn.ReLU()))
+            setattr(self, "z_transform", nn.Sequential(
+                                                    nn.Linear(self.input_dim, self.input_dim),
+                                                    nn.LeakyReLU(negative_slope = 0.2)))
+        
+        if self.transform_embedding:
+            #self.embedding = nn.Embedding(self.num_classes, self.input_dim)
+
+            setattr(self, "embedding_transform", nn.Sequential(
+                                                    nn.Linear(16, 16),
+                                                    nn.LeakyReLU(negative_slope = 0.2)))
+
+        # else:
+        self.embedding = nn.Embedding(self.num_classes, 16)
+
         
         total_injections = 0
         
@@ -186,8 +198,8 @@ class conditional_polygen(nn.Module):
                                                             nn.LeakyReLU(negative_slope = 0.2)))
 
                 setattr(self, "conv_layer{}".format(i+1), nn.Sequential(
-                                                conv(final_layer_filters, 128, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'),
-                                                norm_func(128),
+                                                conv(128, final_layer_filters, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'),
+                                                norm_func(final_layer_filters),
                                                 nn.LeakyReLU(negative_slope = 0.2),
                                                 conv(128, self.layers[i+1], kernel_size = 1, stride = 1, bias=self.bias, pad='reflect'),#,
                                                 nn.Sigmoid()))
@@ -231,17 +243,28 @@ class conditional_polygen(nn.Module):
 
     def forward(self, input, cat):
         #print(self.embedding(cat))
-        embed = self.embedding(cat).squeeze(1).unsqueeze(2).unsqueeze(3)
+        #embed = self.embedding(cat).squeeze(1).unsqueeze(2).unsqueeze(3)
+        embed = self.embedding(cat).squeeze(1)
         #print(input.size(), embed.size())
         if(self.transform_z):
-            input = getattr(self, "global_transform")(input)
+            input = getattr(self, "z_transform")(input)
 
+        if(self.transform_embedding):
+            embed = getattr(self, "embedding_transform")(embed)
+
+        e_tuple = embed.size()
+        embed = embed.view((e_tuple[0], e_tuple[1]//16, 4, 4))
+        
+        #print(input.size(), embed.size())
         #z = input*embed
-        z = torch.cat([input, embed], 1)
-        s_tuple = z.size()
+        s_tuple = input.size()
         ### shape = (batch, input_dim, 1, 1)
-        #z = z.view((s_tuple[0], s_tuple[1]//16, 4, 4))
-        z = z.repeat(s_tuple[0], s_tuple[1], 4, 4)
+        z = input.view((s_tuple[0], s_tuple[1]//16, 4, 4))
+        #embed = embed.repeat(1, s_tuple[1]//16, 1, 1)
+
+        z = torch.cat([z, embed], 1)
+        #print(z.size())
+        #z = z.repeat(s_tuple[0], s_tuple[1], 4, 4)
         ### shape = (batch, input_dim//16, 4, 4)
         injections = self.allowed_injections
 
