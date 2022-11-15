@@ -101,48 +101,59 @@ def conv_transpose(in_f, out_f, kernel_size, stride=2, bias=True, pad='zero'):
 
 
     layers = filter(lambda x: x is not None, [convolver, padder])
-    return nn.Sequential(*layers)
+    final_layers =  nn.Sequential(*layers)
+    #print(convolver, final_layers)
+    return final_layers
 
 
 
 class conditional_polygen(nn.Module):
-    def __init__(self, input_dim, num_classes=5, g_layers=[], remove_hot = 0, activation_fn=True, inject_z=True, transform_rep=1, \
-                    transform_z=False, norm='instance', filter_size = 3, bias = False,\
+    def __init__(self, input_dim, num_classes=5, layers=[], remove_hot = 0, inject_z=True, \
+                    transform_z=True, transform_embedding=True, norm_type='instance', filter_size = 3, bias = False,\
                             skip_connection = False, num_skip=4, skip_size=1, residual=False, up_mode = 'upsample'):
         super(conditional_polygen, self).__init__()
 
         self.residual = residual
-        self.num_layers = len(g_layers)-1
+        self.num_layers = len(layers)-1
         self.allowed_injections = (self.num_layers - 1) - remove_hot
-        self.activation_fn = activation_fn
         self.filter_size = filter_size
 
         #self.downsample_filter = 3
-        self.g_layers = g_layers
+        self.layers = layers
         self.inject_z = inject_z
-        self.num_layers = len(self.g_layers) - 1  # minus the input/output sizes 
+        self.num_layers = len(self.layers) - 1  # minus the input/output sizes 
         self.transform_z = transform_z
-        self.norm = norm
+        self.transform_embedding = transform_embedding
+        self.norm_type = norm_type
         self.bias = bias
         self.skip_connection = skip_connection
         self.num_skip = num_skip
         self.skip_size = skip_size
-        self.g_layers = g_layers
+        self.layers = layers
         self.num_classes = num_classes
         self.input_dim = input_dim
-        self.transform_rep = transform_rep
         self.upsample_mode = up_mode
-        self.embedding = nn.Embedding(self.num_classes, self.input_dim)
+        print(self.upsample_mode)
         
         if self.transform_z:
-            for i in range(self.transform_rep):
-                setattr(self, "global{}".format(i), nn.Sequential(
-                                                        nn.Linear(self.g_layers[0], self.g_layers[0]),
-                                                        nn.ReLU()))
+            setattr(self, "z_transform", nn.Sequential(
+                                                    nn.Linear(self.input_dim, self.input_dim),
+                                                    nn.LeakyReLU(negative_slope = 0.2)))
+        
+        if self.transform_embedding:
+            #self.embedding = nn.Embedding(self.num_classes, self.input_dim)
+
+            setattr(self, "embedding_transform", nn.Sequential(
+                                                    nn.Linear(16, 16),
+                                                    nn.LeakyReLU(negative_slope = 0.2)))
+
+        # else:
+        self.embedding = nn.Embedding(self.num_classes, 16)
+
         
         total_injections = 0
         
-        if(self.norm == 'instance'):
+        if(self.norm_type == 'instance'):
             norm_func = nn.InstanceNorm2d
         else:
             norm_func = nn.BatchNorm2d
@@ -150,35 +161,35 @@ class conditional_polygen(nn.Module):
 
         for i in range(self.num_layers):
             if i > 0 and (i < self.num_layers-1) and self.skip_connection:
-                in_filters = self.g_layers[i] + self.num_skip
+                in_filters = self.layers[i] + self.num_skip
             else:
-                in_filters = self.g_layers[i]
+                in_filters = self.layers[i]
             
             if (i < self.num_layers-1):
                 if self.upsample_mode == 'upsample':
-                    setattr(self, "conv_layer{}".format(i), nn.Sequential(conv(in_filters, self.g_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.g_layers[i+1]),
+                    setattr(self, "conv_layer{}".format(i), nn.Sequential(conv(in_filters, self.layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                                                                        norm_func(self.layers[i+1]),
                                                                         nn.LeakyReLU(negative_slope = 0.2),
                                                                         nn.Upsample(scale_factor=2.0, mode='bicubic', align_corners=False),
-                                                                        conv(self.g_layers[i+1], self.g_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.g_layers[i+1]),
+                                                                        conv(self.layers[i+1], self.layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                                                                        norm_func(self.layers[i+1]),
                                                                         nn.LeakyReLU(negative_slope = 0.2)))
 
                 else:
-                    setattr(self, "conv_layer{}".format(i), nn.Sequential(conv_transpose(in_filters, self.g_layers[i+1], kernel_size = self.filter_size, stride = 2, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.g_layers[i+1]),
+                    setattr(self, "conv_layer{}".format(i), nn.Sequential(conv_transpose(in_filters, self.layers[i+1], kernel_size = self.filter_size, stride = 2, bias=self.bias, pad='reflect'), 
+                                                                        norm_func(self.layers[i+1]),
                                                                         nn.LeakyReLU(negative_slope = 0.2),
-                                                                        conv(self.g_layers[i+1], self.g_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.g_layers[i+1]),
+                                                                        conv(self.layers[i+1], self.layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                                                                        norm_func(self.layers[i+1]),
                                                                         nn.LeakyReLU(negative_slope = 0.2)))
 
             else:
                 if self.skip_connection:
-                        curr_layer_filters =  self.g_layers[i] + self.num_skip
+                        curr_layer_filters =  self.layers[i] + self.num_skip
                         #final_layer_filters = 128 + self.num_skip
                         final_layer_filters = 128
                 else:
-                    curr_layer_filters =  self.g_layers[i]
+                    curr_layer_filters =  self.layers[i]
                     final_layer_filters = 128
 
                 setattr(self, "conv_layer{}".format(i), nn.Sequential(
@@ -187,43 +198,43 @@ class conditional_polygen(nn.Module):
                                                             nn.LeakyReLU(negative_slope = 0.2)))
 
                 setattr(self, "conv_layer{}".format(i+1), nn.Sequential(
-                                                conv(final_layer_filters, 128, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'),
-                                                norm_func(128),
+                                                conv(128, final_layer_filters, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'),
+                                                norm_func(final_layer_filters),
                                                 nn.LeakyReLU(negative_slope = 0.2),
-                                                conv(128, self.g_layers[i+1], kernel_size = 1, stride = 1, bias=self.bias, pad='reflect'),
+                                                conv(128, self.layers[i+1], kernel_size = 1, stride = 1, bias=self.bias, pad='reflect'),#,
                                                 nn.Sigmoid()))
                                                 
                 
             if self.skip_connection and i < self.num_layers-1:
-                #skip_in_filters = self.g_layers[0]
+                #skip_in_filters = self.layers[0]
                 if self.upsample_mode == 'upsample' or i==0:
                 ### upsample purely via upsampling module
-                    setattr(self, "skip_layer{}".format(i), nn.Sequential(conv(self.g_layers[0], self.num_skip, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                    setattr(self, "skip_layer{}".format(i), nn.Sequential(conv(self.layers[0], self.num_skip, kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
                                                                         norm_func(self.num_skip),
                                                                         nn.LeakyReLU(negative_slope = 0.2),
                                                                         nn.Upsample(scale_factor=2**(i+1), mode='bicubic', align_corners=False)))
 
                 else:
                 ### upsample via convtranspose2d + upsample_module    
-                    setattr(self, "skip_layer{}".format(i), nn.Sequential(conv_transpose(self.g_layers[0], self.num_skip, kernel_size = self.filter_size, stride = 2, bias=self.bias, pad='reflect'), 
+                    setattr(self, "skip_layer{}".format(i), nn.Sequential(conv_transpose(self.layers[0], self.num_skip, kernel_size = self.filter_size, stride = 2, bias=self.bias, pad='reflect'), 
                                                                         norm_func(self.num_skip),
                                                                         nn.LeakyReLU(negative_slope = 0.2),
                                                                         nn.Upsample(scale_factor=2**(i), mode='bicubic', align_corners=False)))
 
             if self.inject_z and total_injections < self.allowed_injections:
-                #skip_in_filters = self.g_layers[0]
+                #skip_in_filters = self.layers[0]
                 total_injections += 1
                 if self.upsample_mode == 'upsample' or i==0:
                 ### upsample purely via upsampling module
-                    setattr(self, "inject_layer{}".format(i), nn.Sequential(conv(self.g_layers[0], self.g_layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.g_layers[i+1]),
+                    setattr(self, "inject_layer{}".format(i), nn.Sequential(conv(self.layers[0], self.layers[i+1], kernel_size = self.filter_size, stride = 1, bias=self.bias, pad='reflect'), 
+                                                                        norm_func(self.layers[i+1]),
                                                                         nn.LeakyReLU(negative_slope = 0.2),
                                                                         nn.Upsample(scale_factor=2**(i+1), mode='bicubic', align_corners=False)))
 
                 else:
                 ### upsample via convtranspose2d + upsample_module    
-                    setattr(self, "inject_layer{}".format(i), nn.Sequential(conv_transpose(self.g_layers[0], self.g_layers[i+1], kernel_size = self.filter_size, stride = 2, bias=self.bias, pad='reflect'), 
-                                                                        norm_func(self.g_layers[i+1]),
+                    setattr(self, "inject_layer{}".format(i), nn.Sequential(conv_transpose(self.layers[0], self.layers[i+1], kernel_size = self.filter_size, stride = 2, bias=self.bias, pad='reflect'), 
+                                                                        norm_func(self.layers[i+1]),
                                                                         nn.LeakyReLU(negative_slope = 0.2),
                                                                         nn.Upsample(scale_factor=2**(i), mode='bicubic', align_corners=False)))
 
@@ -232,15 +243,28 @@ class conditional_polygen(nn.Module):
 
     def forward(self, input, cat):
         #print(self.embedding(cat))
-        embed = self.embedding(cat).squeeze(1).unsqueeze(2).unsqueeze(3)
+        #embed = self.embedding(cat).squeeze(1).unsqueeze(2).unsqueeze(3)
+        embed = self.embedding(cat).squeeze(1)
         #print(input.size(), embed.size())
         if(self.transform_z):
-            input = getattr(self, "global_transform")(input)
+            input = getattr(self, "z_transform")(input)
 
-        z = input*embed
-        s_tuple = z.size()
+        if(self.transform_embedding):
+            embed = getattr(self, "embedding_transform")(embed)
+
+        e_tuple = embed.size()
+        embed = embed.view((e_tuple[0], e_tuple[1]//16, 4, 4))
+        
+        #print(input.size(), embed.size())
+        #z = input*embed
+        s_tuple = input.size()
         ### shape = (batch, input_dim, 1, 1)
-        z = z.view((s_tuple[0], s_tuple[1]//16, 4, 4))
+        z = input.view((s_tuple[0], s_tuple[1]//16, 4, 4))
+        #embed = embed.repeat(1, s_tuple[1]//16, 1, 1)
+
+        z = torch.cat([z, embed], 1)
+        #print(z.size())
+        #z = z.repeat(s_tuple[0], s_tuple[1], 4, 4)
         ### shape = (batch, input_dim//16, 4, 4)
         injections = self.allowed_injections
 
@@ -250,14 +274,14 @@ class conditional_polygen(nn.Module):
                 x = z
 
             x = getattr(self, "conv_layer{}".format(i))(x)
-            print("conv", i, x.size())
+            #print("conv", i, x.size())
 
             if(self.inject_z and injections>0):
                 if i < self.num_layers - 1:
 
                     injections -= 1
                     a = getattr(self, "inject_layer{}".format(i))(z)
-                    print("inject", i, a.size())
+                    #print("inject", i, a.size())
 
                     if not self.residual:
                         x *= a
@@ -268,8 +292,8 @@ class conditional_polygen(nn.Module):
             if self.skip_connection:
                 if i < self.num_layers - 1:
                     skip = getattr(self, "skip_layer{}".format(i))(z)
-                    print("skip", i, skip.size())
-                    print("out", i, x.size())
+                    #print("skip", i, skip.size())
+                    #print("out", i, x.size())
                     x = torch.cat((x, skip), dim=1)
 
             #apply injection
