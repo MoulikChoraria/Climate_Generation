@@ -21,8 +21,8 @@ class GAN(pl.LightningModule):
         self.G = generator
         self.D = discriminator
         self.automatic_optimization=False
-        self.G.apply(self.weights_init)
-        self.D.apply(self.weights_init)
+        #self.G.apply(self.weights_init)
+        #self.D.apply(self.weights_init)
         self.eval_loader = None
         self.test_loader = None
 
@@ -42,16 +42,18 @@ class GAN(pl.LightningModule):
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("GAN")
         #parser.add_argument("--data_path", type=str, default="")
-        parser.add_argument("--learning_rate_G", type=float, default=5e-5)
-        parser.add_argument("--learning_rate_D", type=float, default=5e-5)
+        parser.add_argument("--learning_rate_G", type=float, default=1e-4)
+        parser.add_argument("--learning_rate_D", type=float, default=1e-4)
         #parser.add_argument("--D_iters", type=int, default=1)
         return parent_parser
     
     def configure_optimizers(self):
-        g_opt = torch.optim.RMSprop(self.G.parameters(), self.hparams.lr_G)
-        d_opt = torch.optim.RMSprop(self.D.parameters(), self.hparams.lr_D)
-        # g_opt = torch.optim.Adam(self.G.parameters(), self.hparams.lr_G, betas=(0.5, 0.999))
-        # d_opt = torch.optim.Adam(self.D.parameters(), self.hparams.lr_D, betas=(0.5, 0.999))
+        #g_opt = torch.optim.RMSprop(self.G.parameters(), self.hparams.lr_G)
+        #d_opt = torch.optim.RMSprop(self.D.parameters(), self.hparams.lr_D)
+        g_opt = torch.optim.Adam(self.G.parameters(), self.hparams.lr_G, betas=(0.0, 0.9))
+        d_opt = torch.optim.Adam(self.D.parameters(), self.hparams.lr_D, betas=(0.0, 0.9))
+        #g_opt = torch.optim.Adam(self.G.parameters(), self.hparams.lr_G, betas=(0.5, 0.99))
+        #d_opt = torch.optim.Adam(self.D.parameters(), self.hparams.lr_D, betas=(0.5, 0.99))
         return g_opt, d_opt
 
     def validation_step(self, batch, batch_idx):
@@ -81,7 +83,7 @@ class GAN(pl.LightningModule):
 
             if(self.current_epoch > 10):
                 plt.figure(figsize=(8,8))
-                plt.plot([i for i in range(self.current_epoch) if i%self.hparams.val_epoch==0], self.G_validation_losses)#, cmap='gray')
+                plt.plot([i for i in range(len(self.G_validation_losses))], self.G_validation_losses)#, cmap='gray')
                 plt.savefig('/home/moulikc2/expose/Climate Generation/loss_curves/'\
                                 +self.hparams.run_name+'/G_val_epoch_'+str(self.current_epoch)+"_batch_"+str(batch_idx)+'.png')
                 plt.close()
@@ -158,21 +160,21 @@ class GAN(pl.LightningModule):
         #print("yo1")
         ### fake_label = 0
         if(batch_idx==0 and self.current_epoch == 0):
-            self.k = 0.1
+            #self.k = 0.1
             self.random_tensor = real_img
             self.random_categs = categs
-        elif(batch_idx==0 and self.current_epoch > 20):
-            self.k = 0.02
-        k = self.k
+        #elif(batch_idx==0 and self.current_epoch > 20):
+            #self.k = 0.02
+        #k = self.k
         fake_label = torch.full((b_size,), 0, dtype=torch.float)
-        nums = torch.Tensor(np.random.choice([1, 0], size=b_size, p=[k, 1-k]))
-        fake_label+=nums
+        #nums = torch.Tensor(np.random.choice([1, 0], size=b_size, p=[k, 1-k]))
+        #fake_label+=nums
 
         fake_label = fake_label.type_as(categs)
 
         real_label = torch.full((b_size,), 1, dtype=torch.float)
-        nums = torch.Tensor(np.random.choice([0, 1], size=b_size, p=[k, 1-k]))
-        real_label = torch.where(nums > 0, 1, 0)
+        #nums = torch.Tensor(np.random.choice([0, 1], size=b_size, p=[k, 1-k]))
+        #real_label = torch.where(nums > 0, 1, 0)
         #real_label*=nums
         real_label = real_label.type_as(categs)
 
