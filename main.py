@@ -5,6 +5,7 @@ from models.Poly_Generator import conditional_polygen
 from models.Resnet_Gen_Proj import ResNetGenerator
 from models.Resnet_Disc_Proj import ResNetProjectionDiscriminator
 from train_module import *
+from data_utils import *
 import pytorch_lightning as pl
 import os
 
@@ -16,7 +17,7 @@ import torchvision.transforms as transforms
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer, seed_everything
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
 from torch.utils.data import TensorDataset, DataLoader
-from dataset import *
+from Climate_Generation.data_utils import *
 from models import *
 
 
