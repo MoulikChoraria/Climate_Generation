@@ -42,8 +42,8 @@ Demonstration of the performance of the generative model, against original train
 th quantile and while some high level details are missed, we observe that total rainfall for generated the sample increases with increasing quantile (as specified by the control variable).
 
 
-.. image:: figs/sinusoid_comparison.png
-  :width: 600
+.. image:: figs/compare.png
+  :width: 1000
   :alt: Real vs Generated Samples.
 
 Citing
