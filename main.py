@@ -2,7 +2,10 @@
 from argparse import ArgumentParser
 from models.Poly_Discriminator import auxiliary_polydisc, conditional_polydisc
 from models.Poly_Generator import conditional_polygen
+from models.Resnet_Gen_Proj import ResNetGenerator
+from models.Resnet_Disc_Proj import ResNetProjectionDiscriminator
 from train_module import *
+from data_utils import *
 import pytorch_lightning as pl
 import os
 
@@ -14,7 +17,7 @@ import torchvision.transforms as transforms
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer, seed_everything
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
 from torch.utils.data import TensorDataset, DataLoader
-from dataset import *
+from Climate_Generation.data_utils import *
 from models import *
 
 
@@ -82,7 +85,7 @@ if __name__ == "__main__":
     Trainer_parser.add_argument("--run_name", type=str, default="rms_prop_run")
     Trainer_parser.add_argument("--n_critic", type=int, default=4)
     Trainer_parser.add_argument("--lambda_gp", type=float, default=100.0)
-    Trainer_parser.add_argument("--G_iter", type=int, default=5)
+    Trainer_parser.add_argument("--G_iter", type=int, default=1)
 
     #Trainer_parser.add_argument("--lr_G", type=float, default=1e-5)
     #Trainer_parser.add_argument("--lr_D", type=int, default=0)
@@ -93,8 +96,8 @@ if __name__ == "__main__":
     # add all the available trainer options to argparse
     # ie: now --accelerator --devices --num_nodes ... --fast_dev_run all work in the cli
     parser = pl.Trainer.add_argparse_args(parser)
-    #parser = GAN.add_model_specific_args(parser)
-    parser = WGAN.add_model_specific_args(parser)
+    parser = GAN.add_model_specific_args(parser)
+    #parser = WGAN.add_model_specific_args(parser)
     #parser = AuxGAN.add_model_specific_args(parser)
 
 
@@ -145,20 +148,22 @@ if __name__ == "__main__":
     for key in disc_keylist:
         dict_disc[key[2:]] = converted_dict[key]
     
-    disc_model = conditional_polydisc(**dict_disc)
+    #disc_model = conditional_polydisc(**dict_disc)
+    disc_model = ResNetProjectionDiscriminator()
     #disc_model = auxiliary_polydisc(**dict_disc)
     #print(disc_model)
     pytorch_total_params = sum(p.numel() for p in disc_model.parameters())
     print("Discriminator Parameters:", pytorch_total_params)    
-    gen_model = conditional_polygen(**dict_gen)
+    #gen_model = conditional_polygen(**dict_gen)
+    gen_model = ResNetGenerator()
     pytorch_total_params = sum(p.numel() for p in gen_model.parameters())
     print("Generator Parameters:", pytorch_total_params)    
     
 
 
-    #gan_model = GAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.G_iter)
+    gan_model = GAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.G_iter)
     #gan_model = AuxGAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.G_iter)
-    gan_model = WGAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.n_critic, args.lambda_gp)
+    #gan_model = WGAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.n_critic, args.lambda_gp)
     #gan_model.configure_optimizers(args.lr_G, args.lr_D)
 
     BATCH_SIZE = args.batch_size
@@ -187,7 +192,7 @@ if __name__ == "__main__":
     #trainer = Trainer.from_argparse_args(args)
     trainer = Trainer(accelerator=accelerator_train, max_epochs = args.epochs,\
                                         callbacks=[TQDMProgressBar(refresh_rate=5)], \
-                                            check_val_every_n_epoch=1, devices=[1], log_every_n_steps=30)
+                                            check_val_every_n_epoch=1, devices=[0], log_every_n_steps=30)
     #trainer = Trainer(accelerator="auto", devices=1 if torch.cuda.is_available() else None,  # limiting got iPython runs
                         #max_epochs=5,callbacks=[TQDMProgressBar(refresh_rate=20)],)
     trainer.fit(gan_model, train_loader, val_loader)

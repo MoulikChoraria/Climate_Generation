@@ -1,9 +1,9 @@
 """from eriklindernoren/PyTorch-GAN"""
-
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch
-from torchvision.models import vgg19
+import functools
+#from torchvision.models import vgg19
 import math
 
 
@@ -17,81 +17,159 @@ import math
 #         return self.vgg19_54(img)
 
 
-class DenseResidualBlock(nn.Module):
+
+
+class Res_Cond_Generator(nn.Module):
     """
-    The core module of paper: (Residual Dense Network for Image Super-Resolution, CVPR 18)
+    Generator model that uses ResNet architecture between upsampling & downsampling layers.
+    
+    Parms:
+    inp        : channels in input image; default=3
+    out        : channels in output image; default=3
+    res_blocks : number of res-blocks in Resnet; default=6
     """
+    def __init__(self, in_dim=128, bottom_width = 4, ch=32, out=1, res_blocks=6, transform_embedding=True, embed_dim = 16, num_upsamples = 5):
+        
+        assert (res_blocks>0), "There should be atleast 1 ResNet block"
+        
+        super(Res_Cond_Generator,self).__init__()
 
-    def __init__(self, filters, res_scale=0.2):
-        super(DenseResidualBlock, self).__init__()
-        self.res_scale = res_scale
-
-        def block(in_features, non_linearity=True):
-            layers = [nn.Conv2d(in_features, filters, 3, 1, 1, bias=True)]
-            if non_linearity:
-                layers += [nn.LeakyReLU()]
-            return nn.Sequential(*layers)
-
-        self.b1 = block(in_features=1 * filters)
-        self.b2 = block(in_features=2 * filters)
-        self.b3 = block(in_features=3 * filters)
-        self.b4 = block(in_features=4 * filters)
-        self.b5 = block(in_features=5 * filters, non_linearity=False)
-        self.blocks = [self.b1, self.b2, self.b3, self.b4, self.b5]
-
-    def forward(self, x):
-        inputs = x
-        for block in self.blocks:
-            out = block(inputs)
-            inputs = torch.cat([inputs, out], 1)
-        return out.mul(self.res_scale) + x
+        norm_layer = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=False)
+        
+        self.transform_embedding = transform_embedding
+        self.bottom_width = bottom_width
+        num_upsamples
 
 
-class ResidualInResidualDenseBlock(nn.Module):
-    def __init__(self, filters, res_scale=0.2):
-        super(ResidualInResidualDenseBlock, self).__init__()
-        self.res_scale = res_scale
-        self.dense_blocks = nn.Sequential(
-            DenseResidualBlock(filters), DenseResidualBlock(filters), DenseResidualBlock(filters)
-        )
+        if self.transform_embedding:
+            #self.embedding = nn.Embedding(self.num_classes, self.input_dim)
 
-    def forward(self, x):
-        return self.dense_blocks(x).mul(self.res_scale) + x
+            setattr(self, "embedding_transform", nn.Sequential(
+                                                    nn.Linear(embed_dim, embed_dim)))
+
+        # else:
+        self.embedding = nn.Embedding(self.num_classes, embed_dim)
+
+        self.preproc = nn.Linear(in_dim, ch*(bottom_width**2))
+
+        model = [   
+                    nn.ReflectionPad2d(1),                                              #Reflection padding applied to inp image
+
+                    nn.Conv2d(ch + (embed_dim//(bottom_width**2)), 64, kernel_size=3, padding=0, bias=True), 
+                    norm_layer(64),                                                     #InstanceNorm2D applied
+                    nn.ReLU(True),                                                      #Relu activalion applied
+
+                    nn.ReflectionPad2d(1),                                              #Reflection padding applied to inp image
+
+                    nn.Conv2d(64, 256, kernel_size=3, padding=0, bias=True), 
+                    norm_layer(256),                                                     #InstanceNorm2D applied
+                    nn.ReLU(True)                                                      #Relu activalion applied
+                ]
+        
+        for i in range(res_blocks):                                                     #add multiple ResNet blocks
+            
+            if(res_blocks - i <= num_upsamples-2):
+                upsample_block = True
+            else:
+                upsample_block = False
+
+            model +=[
+                        ResnetBlock(inp_channels=256, norm_layer=norm_layer, use_dropout=False, upsample=upsample_block)
+                    ]
 
 
-class GeneratorRRDB(nn.Module):
-    def __init__(self, channels, filters=64, num_res_blocks=16, num_upsample=2):
-        super(GeneratorRRDB, self).__init__()
+        model +=[   
+                    nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1, bias=True),  #upsampling layer: n-2
+                    norm_layer(128),                                                                                #
+                    nn.ReLU(True),                                                                                  #
 
-        # First layer
-        self.conv1 = nn.Conv2d(channels, filters, kernel_size=3, stride=1, padding=1)
-        # Residual blocks
-        self.res_blocks = nn.Sequential(*[ResidualInResidualDenseBlock(filters) for _ in range(num_res_blocks)])
-        # Second conv layer post residual blocks
-        self.conv2 = nn.Conv2d(filters, filters, kernel_size=3, stride=1, padding=1)
-        # Upsampling layers
-        upsample_layers = []
-        for _ in range(num_upsample):
-            upsample_layers += [
-                nn.Conv2d(filters, filters * 4, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(),
-                nn.PixelShuffle(upscale_factor=2),
-            ]
-        self.upsampling = nn.Sequential(*upsample_layers)
-        # Final output block
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(filters, filters, kernel_size=3, stride=1, padding=1),
-            nn.LeakyReLU(),
-            nn.Conv2d(filters, channels, kernel_size=3, stride=1, padding=1),
-        )
+                    nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1, bias=True),   #upsampling layer: n-1
+                    norm_layer(64),                                                                                 #
+                    nn.ReLU(True),                                                                                  #
 
-    def forward(self, x):
-        out1 = self.conv1(x)
-        out = self.res_blocks(out1)
-        out2 = self.conv2(out)
-        out = torch.add(out1, out2)
-        out = self.upsampling(out)
-        out = self.conv3(out)
+                    nn.ReflectionPad2d(3),                                              #Reflection padding applied
+
+                    nn.Conv2d(64, 3, kernel_size=7, padding=0),                         #7X7 conv applied; 3 filters/outputs
+
+                    nn.Tanh()                                                           #Tanh activation function used finally
+
+                ]
+            
+        self.model = nn.Sequential(*model)
+
+    def forward(self, inp, cat):
+        """Standard forward pass"""
+        inp = self.preproc(inp)
+        embed = self.embedding(cat).squeeze(1)
+
+        if(self.transform_embedding):
+            embed = getattr(self, "embedding_transform")(embed)
+
+        e_tuple = embed.size()
+        embed = embed.view((e_tuple[0], e_tuple[1]//(self.bottom_width**2), self.bottom_width, self.bottom_width))
+        
+        #z = input*embed
+        s_tuple = inp.size()
+        ### shape = (batch, input_dim, 1, 1)
+        z = inp.view((s_tuple[0], s_tuple[1]//(self.bottom_width**2), self.bottom_width, self.bottom_width))
+        #embed = embed.repeat(1, s_tuple[1]//16, 1, 1)
+
+        z = torch.cat([z, embed], 1)
+
+        return self.model(z)
+                    
+
+class ResnetBlock(nn.Module):
+    """Define a Resnet block
+    
+    Params:
+    inp_channel      : mo. channels given as input; default=3
+    norm_layer       : normalisation layer to be used
+    use_dropout      : whether to use dropout or not; default=False
+    """
+    def __init__(self, norm_layer, inp_channels=256, use_dropout=False, upsample=False, learnable_sc=False):
+        """Initialize the Resnet block
+        A resnet block is a conv block with skip connections
+        We construct a conv block ,
+        and implement skip connections in <forward> function.
+        Original Resnet paper: https://arxiv.org/pdf/1512.03385.pdf
+        Parameters:
+            inp_channels (int)  -- the number of channels in the conv layer.
+            norm_layer          -- normalization layer
+            use_dropout (bool)  -- if use dropout layers; default=False
+        """
+        super(ResnetBlock, self).__init__()
+
+        self.upsample = upsample
+        self.learnable_sc = learnable_sc
+        
+        res_block_1 =[                                                                    # 1 full Resnet Block
+                        nn.ReflectionPad2d(1),
+                        nn.Conv2d(inp_channels, inp_channels, kernel_size=3, padding=0, bias=True),
+                        norm_layer(inp_channels),
+                        nn.ReLU(True)]
+        res_block_2 = [#nn.Dropout(0.5),                                               #dont use dropout- Niranjan
+                        nn.ReflectionPad2d(1),
+                        nn.Conv2d(inp_channels, inp_channels, kernel_size=3, padding=0, bias=True),
+                        norm_layer(inp_channels)]
+        
+        self.res_block_1 = nn.Sequential(*res_block_1)
+        self.res_block_2 = nn.Sequential(*res_block_2)
+
+        if self.learnable_sc == True:
+            self.s_sc = nn.Conv2d(inp_channels, inp_channels, kernel_size=1, padding=0, bias=True)
+
+    def forward(self, inp):
+        """Forward pass of thos ResNet block only (with skip connections)"""
+        x = inp
+        inp = self.res_block_1(inp)
+        if self.upsample:
+            inp = F.upsample(inp, scale_factor=2)
+            x = F.upsample(x, scale_factor=2)
+        inp = self.res_block_2(inp)
+        if self.learnable_sc:
+            x = self.s_sc(x)
+        out = inp + x                                                 # add skip connections
         return out
 
 
@@ -101,7 +179,7 @@ class Discriminator(nn.Module):
 
         self.input_shape = input_shape
         in_channels, in_height, in_width = self.input_shape
-        patch_h, patch_w = int(in_height / 2 ** 4), int(in_width / 2 ** 4)
+        patch_h, patch_w = int(in_height / 2 ** 6), int(in_width / 2 ** 6)
         self.output_shape = (1, patch_h, patch_w)
 
         def discriminator_block(in_filters, out_filters, first_block=False):
@@ -117,11 +195,11 @@ class Discriminator(nn.Module):
 
         layers = []
         in_filters = in_channels
-        for i, out_filters in enumerate([64, 128, 256, 512]):
+        for i, out_filters in enumerate([64, 128, 128, 256, 256, 512]):
             layers.extend(discriminator_block(in_filters, out_filters, first_block=(i == 0)))
             in_filters = out_filters
 
-        layers.append(nn.Conv2d(out_filters, 1, kernel_size=3, stride=1, padding=1))
+        layers.append(nn.Conv2d(out_filters, 1, kernel_size=3, stride=2, padding=1))
 
         self.model = nn.Sequential(*layers)
 
