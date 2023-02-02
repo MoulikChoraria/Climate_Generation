@@ -35,6 +35,16 @@ downstream impacts. For instance, current state-of-the-art process-based agricul
 accurate estimation of crop yields. However, high-resolution climate data for future climates is unavailable and needs to be simulated, and that too for multiple possible climate scenarios, which becomes prohibitively expensive via traditional methods. Meanwhile, deep generative models leveraging the expressivity of neural networks have shown immense promise in modeling distributions in high dimensions. Here, we cast the problem of simulation of climate scenarios in a generative modeling
 framework. Specifically, we leverage GANs (Generative Adversarial Networks) for simulating synthetic climate scenarios. We condition the model by quantifying the degree of “extremeness" of the observed sample, which allows us to sample from different parts of the distribution. We demonstrate the efficacy of the proposed method on the CHIRPS precipitation dataset. 
 
+Results
+================
+
+Demonstration of the performance of the generative model, against original training data. Row i corresponds to samples from the i
+th quantile and while some high level details are missed, we observe that total rainfall for generated the sample increases with increasing quantile (as specified by the control variable).
+
+
+.. image:: figs/sinusoid_comparison.png
+  :width: 600
+  :alt: Real vs Generated Samples.
 
 Citing
 ======
