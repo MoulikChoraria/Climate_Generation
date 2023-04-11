@@ -7,12 +7,13 @@ from models.layers import SNConv2d, SNLinear, SNEmbedding
 class DiscBlock(nn.Module):
     def __init__(self, in_channels, out_channels, hidden_channels=None, ksize=3, pad=1,
                  activation=F.relu, downsample=True, n_classes=0, init=True,
-                 sn=True, downsample_first=False):
+                 sn=True, downsample_first=False, learnable_downsampling = False):
         super().__init__()
         if activation is None or activation == 'None':
             # # define the identity, since we do not add a nonlinear activation.
             activation = lambda x: x
         self.activation = activation
+        self.learnable_downsampling = learnable_downsampling
         #self.norm = norm
         self.downsample = downsample
         self.learnable_sc = in_channels != out_channels or downsample
@@ -21,19 +22,19 @@ class DiscBlock(nn.Module):
         self.sn = sn
         self.downsample_first = downsample_first and self.downsample
 
-        # # define the two conv layers.
-        # self.c1 = nn.Conv2d(in_channels, hidden_channels, ksize, padding=pad)
-        # self.c2 = nn.Conv2d(hidden_channels, out_channels, ksize, padding=pad)
-        # if self.sn:
-        #     nn.utils.spectral_norm(self.c1)
-        #     nn.utils.spectral_norm(self.c2)
         if self.sn:
-            # # TODO: if this is used in the end, make nice with an if in the beginning!
-            self.c1 = SNConv2d(in_channels, hidden_channels, ksize, padding=pad)
-            self.c2 = SNConv2d(hidden_channels, out_channels, ksize, padding=pad)
+            conv_func = SNConv2d
+
         else:
-            self.c1 = nn.Conv2d(in_channels, hidden_channels, ksize, padding=pad)
-            self.c2 = nn.Conv2d(hidden_channels, out_channels, ksize, padding=pad)
+            conv_func = nn.Conv2d
+
+        if not self.learnable_downsampling:
+            self.c1 = conv_func(in_channels, hidden_channels, ksize, padding=pad)
+            self.c2 = conv_func(hidden_channels, out_channels, ksize, padding=pad)
+        else:
+            self.c1 = conv_func(in_channels, hidden_channels, ksize, padding=pad)
+            self.c2 = conv_func(hidden_channels, out_channels, ksize, stride=2, padding=pad)
+
         if init:
             # # initialization of the conv layers.
             nn.init.zeros_(self.c1.bias)
@@ -46,14 +47,13 @@ class DiscBlock(nn.Module):
         #     raise NotImplementedError(m1)
         #     self.b1 = norm(in_channels)
         #     self.b2 = norm(hidden_channels)
+
         if self.learnable_sc:
-            # self.c_sc = nn.Conv2d(in_channels, out_channels, 1, padding=0)
-            # if self.sn:
-            #     nn.utils.spectral_norm(self.c_sc)
-            self.c_sc = SNConv2d(in_channels, out_channels, 1, padding=0)
-            if init:
-                nn.init.xavier_uniform_(self.c_sc.weight)
-                nn.init.zeros_(self.c_sc.bias)
+            self.c_sc = conv_func(in_channels, out_channels, 1, padding=0)
+
+        if init:
+            nn.init.xavier_uniform_(self.c_sc.weight)
+            nn.init.zeros_(self.c_sc.bias)
 
     def forward(self, x, y=None):
         h = x
@@ -61,7 +61,7 @@ class DiscBlock(nn.Module):
         h = self.c1(h)
         h = self.activation(h)
         h = self.c2(h)
-        if self.downsample:
+        if not self.learnable_downsampling:
             h = F.avg_pool2d(h, 2)
         if self.learnable_sc:
             if self.downsample_first:
@@ -82,7 +82,8 @@ class ResNetProjectionDiscriminator(nn.Module):
         super().__init__()
         if downsamples is None:
             # # initialize with the downsampling of resnet_32.
-            downsamples = [1, 1, 1, 1, 1, 1]
+            #downsamples = [1, 1, 1, 1, 1, 1]
+            downsamples = [1, 1, 1, 1, 1, 0, 0]
         self.downsamples = downsamples
         self.activation = activation
         self.init = init
@@ -93,17 +94,19 @@ class ResNetProjectionDiscriminator(nn.Module):
         # # convenience function for the residual block.
         Bl1 = partial(DiscBlock, activation=activation, n_classes=self.n_classes, init=self.init,
                       sn=self.sn)
-        self.block1 = Bl1(ch_input, ch, downsample=downsamples[0], hidden_channels=ch, downsample_first=True)
-        self.block2 = Bl1(ch, ch * mult_fact, downsample=downsamples[1])
-        self.block3 = Bl1(ch * mult_fact, ch * mult_fact, downsample=downsamples[2])
-        self.block4 = Bl1(ch * mult_fact, ch * mf(2), downsample=downsamples[3])
-        curr = mf(2)
+        self.block1 = Bl1(ch_input, ch * mf(1), downsample=downsamples[0], hidden_channels=ch, downsample_first=True)
+        self.block2 = Bl1(ch * mf(1) , ch * mf(2), downsample=downsamples[1])
+        self.block3 = Bl1(ch * mf(2), ch * mf(3), downsample=downsamples[2])
+        self.block4 = Bl1(ch * mf(3), ch * mf(3), downsample=downsamples[3])
+        curr = mf(3)
+        ly = 3
 
         # # additional blocks to be added.
         for i in range(len(downsamples) - 4):
-            setattr(self, 'block{}'.format(i + 5), Bl1(ch * curr, ch * mf(3), 
+            setattr(self, 'block{}'.format(i + 5), Bl1(ch * curr, ch * mf(ly), 
                                                        downsample=downsamples[4 + i]))
-            curr = mf(3)
+            curr = mf(ly)
+            ly+=1
 
         # self.l6 = nn.Linear(ch * mf(len(downsamples) - 1), 1, bias=False)
         # if self.sn:

@@ -89,10 +89,10 @@ def return_norm(type_norm, n_classes=0):
 
 
 class ResNetGenerator(nn.Module):
-    def __init__(self, ch=256, dim_z=128, bottom_width=4, activation=F.relu,
-                 n_classes=5, use_out_activ=True, mult_fact=1, z_mult=None,
-                 add_blocks=2, init=True, type_norm='batch', out_ch=1,
-                 distribution='normal', training=True):
+    def __init__(self, ch=32, dim_z=128, bottom_width=2, activation=F.relu,
+                 n_classes=5, use_out_activ=True, mult_fact=2, z_mult=None,
+                 add_blocks=3, init=True, type_norm='batch', out_ch=1,
+                 distribution='normal', training=True, out_dim=64):
         """
         Resnet generator; based on SNGAN but augmented with new functionalities.
         :param ch: int, base channels for each residual block.
@@ -114,6 +114,13 @@ class ResNetGenerator(nn.Module):
         """
         super().__init__()
         self.bottom_width = bottom_width
+        self.num_upsamples = 0
+        width = out_dim
+        while width>bottom_width:
+            self.num_upsamples += 1
+            width = width//2
+        assert self.num_upsamples >= 3, "expected output too small, reconfigure network"
+
         self.out_activ = tanh if use_out_activ else lambda x: x
         if activation is None or activation == 'None':
             # # define the identity, since we do not add a nonlinear one.
@@ -143,18 +150,33 @@ class ResNetGenerator(nn.Module):
         if self.init:
             nn.init.xavier_uniform_(self.l1.weight)
             nn.init.zeros_(self.l1.bias)
-        self.block2 = Bl1(ch * mf(4), ch * mf(3), upsample=True)
-        self.block3 = Bl1(ch * mf(3), ch * mf(3), upsample=True)
-        self.block4 = Bl1(ch * mf(3), ch * mf(2), upsample=True)
-        curr = ch * mf(2)
+        self.block2 = Bl1(ch * mf(4), ch * mf(4), upsample=True)
+        self.block3 = Bl1(ch * mf(4), ch * mf(3), upsample=True)
+        self.block4 = Bl1(ch * mf(3), ch * mf(3), upsample=True)
+        num_upsamples = self.num_upsamples-3
+        #self.block4 = Bl1(ch * mf(3), ch * mf(2), upsample=False)
+        curr = ch * mf(3)
+        ly = 3
+        next_ch = ch * mf(ly)
+
+        add_blocks = max(self.add_blocks, num_upsamples)
         # # add residual blocks if requested.
-        for i in range(self.add_blocks):
-            setattr(self, 'block{}'.format(i + 5), Bl1(ch * mf(2), curr, upsample=True))
-            if (i == self.add_blocks -2):
-                curr = ch * mf(1)
+        for i in range(add_blocks):
+            up = True  if num_upsamples>0 else False
+            setattr(self, 'block{}'.format(i + 5), Bl1(curr, next_ch, upsample=up))
+            num_upsamples-=1
+            curr = next_ch
+            if ly > 2:
+                next_ch = ch * mf(ly-1)
+                ly -= 1
+            
         #print(curr, ch * mf(1))
-        self.b5 = nn.BatchNorm2d(ch * mf(1))
-        self.l5 = nn.Conv2d(ch, out_ch, kernel_size=3, stride=1, padding=1)
+        if self.n_classes == 0:
+            self.b5 = self.norm(curr)
+        else:
+            self.b5 = self.norm(curr, n_classes)
+
+        self.l5 = nn.Conv2d(curr, out_ch, kernel_size=3, stride=1, padding=1)
         if self.init:
             nn.init.xavier_uniform_(self.l5.weight)
             nn.init.zeros_(self.l5.bias)
@@ -183,7 +205,10 @@ class ResNetGenerator(nn.Module):
         for i in range(self.add_blocks):
             h = getattr(self, 'block{}'.format(i + 5))(h, y)
         #print(h.size())
-        h = self.b5(h)
+        if self.n_classes > 0:
+            h = self.b5(h, y)
+        else:
+            h = self.b5(h)
         h = self.activation(h)
         h = self.out_activ(self.l5(h))
         return h

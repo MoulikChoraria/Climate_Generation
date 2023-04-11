@@ -7,6 +7,8 @@ import torchvision.utils as vutils
 from collections import OrderedDict
 import numpy as np
 import seaborn as sns
+import torch.nn as nn
+
 
 
 
@@ -18,6 +20,7 @@ class GAN(pl.LightningModule):
         self.G = generator
         self.D = discriminator
         self.automatic_optimization=False
+        self.n_classes = self.G.n_classes
         #self.G.apply(self.weights_init)
         #self.D.apply(self.weights_init)
         self.eval_loader = None
@@ -47,10 +50,10 @@ class GAN(pl.LightningModule):
     def configure_optimizers(self):
         #g_opt = torch.optim.RMSprop(self.G.parameters(), self.hparams.lr_G)
         #d_opt = torch.optim.RMSprop(self.D.parameters(), self.hparams.lr_D)
-        g_opt = torch.optim.Adam(self.G.parameters(), self.hparams.lr_G, betas=(0.0, 0.9))
-        d_opt = torch.optim.Adam(self.D.parameters(), self.hparams.lr_D, betas=(0.0, 0.9))
-        #g_opt = torch.optim.Adam(self.G.parameters(), self.hparams.lr_G, betas=(0.5, 0.99))
-        #d_opt = torch.optim.Adam(self.D.parameters(), self.hparams.lr_D, betas=(0.5, 0.99))
+        #g_opt = torch.optim.Adam(self.G.parameters(), self.hparams.lr_G, betas=(0.0, 0.9))
+        #d_opt = torch.optim.Adam(self.D.parameters(), self.hparams.lr_D, betas=(0.0, 0.9))
+        g_opt = torch.optim.Adam(self.G.parameters(), self.hparams.lr_G, betas=(0.5, 0.99))
+        d_opt = torch.optim.Adam(self.D.parameters(), self.hparams.lr_D, betas=(0.5, 0.99))
         return g_opt, d_opt
 
     def validation_step(self, batch, batch_idx):
@@ -162,9 +165,13 @@ class GAN(pl.LightningModule):
             self.random_categs = categs
         #elif(batch_idx==0 and self.current_epoch > 20):
             #self.k = 0.02
-        #k = self.k
+        k = 0.1
         fake_label = torch.full((b_size,), 0, dtype=torch.float)
-        #nums = torch.Tensor(np.random.choice([1, 0], size=b_size, p=[k, 1-k]))
+
+        ### add noise on conditional variable
+        noise = torch.Tensor(np.random.choice([1, 0], size=b_size, p=[k, 1-k])).type_as(categs)
+        noise = torch.where(categs>0, noise, 0)
+        categs = categs-noise
         #fake_label+=nums
 
         fake_label = fake_label.type_as(categs)
@@ -178,6 +185,7 @@ class GAN(pl.LightningModule):
         # Forward pass real batch through D
         self.D.zero_grad()
         d_output = self.D(real_img, categs).view(-1)
+        #print("real:",real_img.size())
         #print("d_step")
 
         errD_real = self.criterion(d_output, real_label)
@@ -186,6 +194,7 @@ class GAN(pl.LightningModule):
         noise = torch.randn((b_size, self.latent_dim, 1, 1))
         noise = noise.type_as(real_img)
         g_X = self.G(noise, categs)
+        #print("fake:", g_X.size())
         #print("g_step")
 
         d_output = self.D(g_X.detach(), categs).view(-1)
@@ -209,6 +218,8 @@ class GAN(pl.LightningModule):
         g_opt.zero_grad()
         for i in range(self.hparams.G_iter):
           g_X = self.G(noise, categs)
+          noise = torch.randn((b_size, self.latent_dim, 1, 1))
+          noise = noise.type_as(real_img)
           errG = self.criterion(self.D(g_X, categs).view(-1), real_label)
           self.manual_backward(errG)
           g_opt.step()
@@ -238,7 +249,6 @@ class GAN(pl.LightningModule):
                     rainfall_stats_gan.append(torch.mean(fake[j]).item())
                     rainfall_stats_true.append(torch.mean(imgs[j]).item())
 
-            print("yo")        
             plt.figure(figsize=(8,8))
             sns.set_style('whitegrid')
             sns.kdeplot(np.array(rainfall_stats_gan), label='GAN samples')
@@ -715,14 +725,134 @@ class AuxGAN(pl.LightningModule):
             sch2.step()
 
 
-        # errG = self.criterion(self.D(g_X, categs).view(-1), real_label)
-        # # Calculate gradients for G
-        # g_opt.zero_grad()
-        # self.manual_backward(errG)
-        # self.log_dict({"g_loss": errG, "d_loss": errD}, prog_bar=True)
-        # self.G_epoch_training_losses.append(errG.item())
-        # self.D_epoch_training_losses.append(errD.item())
+class Pix2Pix(pl.LightningModule):
+    def __init__(self, generator, discriminator, run_name, learning_rate=0.0003, lambda_recon=20, add_noise=False):
 
-        # # Update G
-        # g_opt.step()
-        #print("finished one step")
+        super().__init__()
+        self.save_hyperparameters()
+        self.add_noise = add_noise
+
+        #self.gen = Generator(in_channels, out_channels)
+        #self.patch_gan = PatchGAN(in_channels + out_channels)
+        self.gen = generator
+        self.patch_gan = discriminator
+
+        # intializing weights
+        self.gen = self.gen.apply(self._weights_init)
+        self.patch_gan = self.patch_gan.apply(self._weights_init)
+
+        self.adversarial_criterion = nn.BCEWithLogitsLoss()
+        self.recon_criterion = nn.L1Loss()
+        self.eval_loader = None
+
+        self.save_hyperparameters("learning_rate", "lambda_recon", "run_name")
+
+    def _weights_init(self, m):
+        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
+        if isinstance(m, nn.BatchNorm2d):
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
+            torch.nn.init.constant_(m.bias, 0)
+        
+    def _gen_step(self, real_images, conditioned_images):
+        # Pix2Pix has adversarial and a reconstruction loss
+        # First calculate the adversarial loss
+        if self.add_noise:
+            noise = torch.randn(conditioned_images.size())
+            noise = noise.type_as(conditioned_images)
+        else:
+            noise = None
+            
+        fake_images = self.gen(conditioned_images, noise)
+        disc_logits = self.patch_gan(fake_images, conditioned_images)
+        adversarial_loss = self.adversarial_criterion(disc_logits, torch.ones_like(disc_logits))
+
+        # calculate reconstruction loss
+        recon_loss = self.recon_criterion(fake_images, real_images)
+        lambda_recon = self.hparams.lambda_recon
+
+        return adversarial_loss + lambda_recon * recon_loss
+
+    def _disc_step(self, real_images, conditioned_images):
+        if self.add_noise:
+            noise = torch.randn(conditioned_images.size())
+            noise = noise.type_as(conditioned_images)
+        else:
+            noise = None
+        
+        fake_images = self.gen(conditioned_images, noise).detach()
+        fake_logits = self.patch_gan(fake_images, conditioned_images)
+
+        real_logits = self.patch_gan(real_images, conditioned_images)
+
+        fake_loss = self.adversarial_criterion(fake_logits, torch.zeros_like(fake_logits))
+        real_loss = self.adversarial_criterion(real_logits, torch.ones_like(real_logits))
+        return (real_loss + fake_loss) / 2
+
+    def configure_optimizers(self):
+        lr = self.hparams.learning_rate
+        gen_opt = torch.optim.Adam(self.gen.parameters(), lr=lr)
+        disc_opt = torch.optim.Adam(self.patch_gan.parameters(), lr=lr)
+        return disc_opt, gen_opt
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        real, condition = batch
+
+        loss = None
+        if optimizer_idx == 0:
+            loss = self._disc_step(real, condition)
+            self.log("PatchGAN Loss", loss)
+        elif optimizer_idx == 1:
+            loss = self._gen_step(real, condition)
+            self.log("Generator Loss", loss)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        #x, y = batch[0].to(self.device), batch[1].to(self.device)
+        if self.add_noise:
+            x, categs, noise = batch[0], batch[1], batch[2]
+        else:
+            x, categs = batch[0], batch[1]
+
+        
+        if(batch_idx == 0):
+            eval_batch = next(iter(self.eval_loader))
+            if self.add_noise:
+                fixed_images, fixed_maps, noise = eval_batch[0], eval_batch[1], eval_batch[2]
+                noise = noise.type_as(categs)
+            else:
+                fixed_images, fixed_maps = eval_batch[0], eval_batch[1]
+                noise = None
+            fixed_images = fixed_images.type_as(x)
+            fixed_maps = fixed_maps.type_as(categs)
+            #print(x.size(), y.size())
+            fake_images = self.gen(fixed_maps, noise)
+                
+            #preds = self.patch_gan(fake, fixed_maps)
+
+            #self.validation_history.append((vutils.make_grid(fake, padding=2, normalize=True)[:1, :, :].squeeze(0), preds.detach().cpu().numpy()))
+            #print(y, preds)
+            plt.figure(figsize=(8,8))
+            plt.imshow(vutils.make_grid(fake_images, padding=2, normalize=True, nrow=5)[:1, :, :].squeeze(0).detach().cpu().numpy())#, cmap='gray')
+            plt.savefig('/home/moulikc2/expose/Climate Generation/validation_figs/'\
+                            +self.hparams.run_name+'/epoch_'+str(self.current_epoch)+'generated' + '.png')
+            plt.close()
+
+            plt.figure(figsize=(8,8))
+            plt.imshow(vutils.make_grid(fixed_images, padding=2, normalize=True, nrow=5)[:1, :, :].squeeze(0).detach().cpu().numpy())#, cmap='gray')
+            plt.savefig('/home/moulikc2/expose/Climate Generation/validation_figs/'\
+                            +self.hparams.run_name+'/epoch_'+str(self.current_epoch)+'actual' + '.png')
+            plt.close()
+
+        # x, categs = batch[0], batch[1]
+        # b_size = x.size(0) 
+        # noise = torch.randn((b_size, self.latent_dim, 1, 1))
+        # noise = noise.type_as(x)
+        # g_X = self.G(noise, categs)
+        # real_label = torch.full((b_size,), 1, dtype=torch.float)
+        # real_label = real_label.type_as(categs)
+        # #print("g_step")        
+
+        # errG = self.criterion(self.D(g_X, categs).view(-1), real_label)
+        # self.G_epoch_validation_losses.append(errG.item())

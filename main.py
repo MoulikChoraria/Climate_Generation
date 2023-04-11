@@ -4,6 +4,7 @@ from models.Poly_Discriminator import auxiliary_polydisc, conditional_polydisc
 from models.Poly_Generator import conditional_polygen
 from models.Resnet_Gen_Proj import ResNetGenerator
 from models.Resnet_Disc_Proj import ResNetProjectionDiscriminator
+from models.pix2pix import Generator_pix2pix_asymmetric, PatchGAN_asymmetric
 from train_module import *
 from data_utils import *
 import pytorch_lightning as pl
@@ -17,7 +18,7 @@ import torchvision.transforms as transforms
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer, seed_everything
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
 from torch.utils.data import TensorDataset, DataLoader
-from Climate_Generation.data_utils import *
+from data_utils import *
 from models import *
 
 
@@ -82,10 +83,12 @@ if __name__ == "__main__":
     Trainer_parser.add_argument("--batch_size", type=int, default=64)
     Trainer_parser.add_argument("--seed", type=int, default=566)
     Trainer_parser.add_argument("--train_val_split", type=float, default=1)
-    Trainer_parser.add_argument("--run_name", type=str, default="rms_prop_run")
+    Trainer_parser.add_argument("--run_name", type=str, default="wgan_wrf")
     Trainer_parser.add_argument("--n_critic", type=int, default=4)
     Trainer_parser.add_argument("--lambda_gp", type=float, default=100.0)
     Trainer_parser.add_argument("--G_iter", type=int, default=1)
+    Trainer_parser.add_argument("--pix2pix", type=bool, default=True)
+    Trainer_parser.add_argument("--patch_dim", type=int, default=8)
 
     #Trainer_parser.add_argument("--lr_G", type=float, default=1e-5)
     #Trainer_parser.add_argument("--lr_D", type=int, default=0)
@@ -103,6 +106,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     ### make run directory
+    args.run_name = args.run_name+'_wrf'
 
     path_train_figs = '/home/moulikc2/expose/Climate Generation/loss_curves/'+args.run_name
 
@@ -123,14 +127,14 @@ if __name__ == "__main__":
         os.makedirs(path_val_figs)
         #print("The new directory is created!")
     
-    path_val_figs = '/home/moulikc2/expose/Climate Generation/test_figs/'+args.run_name
+    path_test_figs = '/home/moulikc2/expose/Climate Generation/test_figs/'+args.run_name
 
     # Check whether the specified path exists or not
-    isExist = os.path.exists(path_val_figs)
+    isExist = os.path.exists(path_test_figs)
 
     if not isExist:
     # Create a new directory because it does not exist 
-        os.makedirs(path_val_figs)
+        os.makedirs(path_test_figs)
         #print("The new directory is created!")
 
 
@@ -149,41 +153,62 @@ if __name__ == "__main__":
         dict_disc[key[2:]] = converted_dict[key]
     
     #disc_model = conditional_polydisc(**dict_disc)
-    disc_model = ResNetProjectionDiscriminator()
+    #disc_model = ResNetProjectionDiscriminator()
     #disc_model = auxiliary_polydisc(**dict_disc)
+    disc_model = PatchGAN_asymmetric()
     #print(disc_model)
     pytorch_total_params = sum(p.numel() for p in disc_model.parameters())
     print("Discriminator Parameters:", pytorch_total_params)    
     #gen_model = conditional_polygen(**dict_gen)
-    gen_model = ResNetGenerator()
+    #gen_model = ResNetGenerator()
+    gen_model = Generator_pix2pix_asymmetric(in_channels=2)
     pytorch_total_params = sum(p.numel() for p in gen_model.parameters())
     print("Generator Parameters:", pytorch_total_params)    
+    #print(gen_model)
+
+    out_gen = gen_model(torch.rand(1, 1, 64, 64), torch.rand(1, 1, 64, 64))
+    print(out_gen.size())
+
+    #out_disc = disc_model(torch.rand(1, 1, 64, 64), torch.rand(1, 1, 64, 64))
+
     
 
+    #print(out_disc.size())
 
-    gan_model = GAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.G_iter)
+    #gan_model = GAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.G_iter)
     #gan_model = AuxGAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.G_iter)
     #gan_model = WGAN(gen_model, disc_model, args.learning_rate_G, args.learning_rate_D, args.run_name, args.val_epochs, args.n_critic, args.lambda_gp)
     #gan_model.configure_optimizers(args.lr_G, args.lr_D)
+    add_noise = True
+    gan_model = Pix2Pix(gen_model, disc_model, args.run_name, add_noise=add_noise)
 
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = 32
 
     ### dataset
-    train_loader, val_loader, test_loader, train_stats = prep_dataloaders(args.data_path, args.g_num_classes, \
-                                                        'log_transform', bs = BATCH_SIZE, workers=NUM_WORKERS, sampler=True)
+    # train_loader, val_loader, test_loader, train_stats = prep_dataloaders(args.data_path, ncategs=args.g_num_classes, \
+    #                                                     'global', bs = BATCH_SIZE, workers=NUM_WORKERS, \
+    #                                                         sampler=True, norm='log_transform_min_max')
+    train_loader, val_loader, test_loader, train_stats = prep_dataloaders_pix2pix(args.data_path, ncategs=args.g_num_classes, \
+                                                         bs = BATCH_SIZE, workers=NUM_WORKERS, sampler=False, norm='log_transform_min_max', \
+                                                            patch_dim=args.patch_dim, map='avg', add_noise = add_noise)
 
     #print("PHEW")
     # if(val_loader == None):
     print("creating fixed datapoints for eval")
-    fixed_noise = torch.randn(40, args.g_input_dim, 1, 1)
-    fixed_labels = torch.LongTensor(np.array([i//8 for i in range(40)])[:, np.newaxis])
-    #print(fixed_labels)
-    #print(gen_model(fixed_noise, fixed_labels))
-    chirps_val_dataset = TensorDataset(fixed_noise, fixed_labels)
-    eval_dataloader = DataLoader(chirps_val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
-    gan_model.eval_loader = eval_dataloader
-    gan_model.test_loader = test_loader
+    if not args.pix2pix:
+        fixed_noise = torch.randn(40, args.g_input_dim, 1, 1)
+        fixed_labels = torch.LongTensor(np.array([i//8 for i in range(40)])[:, np.newaxis])
+        #print(fixed_labels)
+        #print(gen_model(fixed_noise, fixed_labels))
+        chirps_val_dataset = TensorDataset(fixed_noise, fixed_labels)
+        eval_dataloader = DataLoader(chirps_val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+        gan_model.eval_loader = eval_dataloader
+        gan_model.test_loader = test_loader
+    else:
+        gan_model.eval_loader = val_loader
+        
+    
 
     device = torch.device("cpu") if not torch.cuda.is_available() else torch.device("cuda:1")
     print(device)
